@@ -35,12 +35,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import logging
-import pickle
 import socket
 import struct
 import traceback
-
-from datetime import timedelta
 
 import tornado.web
 
@@ -50,10 +47,11 @@ from werkzeug.http import parse_accept_header
 
 from cms import config
 from cms.db import Contest, Participation, User
+from cms.redis import get_session, set_session
 from cms.server import CommonRequestHandler, compute_actual_phase, \
     file_handler_gen, get_url_root
 from cms.locale import filter_language_codes
-from cmscommon.datetime import get_timezone, make_datetime, make_timestamp
+from cmscommon.datetime import get_timezone
 from cmscommon.isocodes import translate_language_code, \
     translate_language_country_code
 
@@ -149,7 +147,7 @@ class BaseHandler(CommonRequestHandler):
                 participation = self._get_current_user_from_ip()
                 # If the login is IP-based, we delete previous cookies.
                 if participation is not None:
-                    self.clear_cookie("login")
+                    self.clear_cookie("session")
             except RuntimeError:
                 return None
 
@@ -158,7 +156,7 @@ class BaseHandler(CommonRequestHandler):
             participation = self._get_current_user_from_cookie()
 
         if participation is None:
-            self.clear_cookie("login")
+            self.clear_cookie("session")
             return None
 
         # Check if user is using the right IP (or is on the right subnet),
@@ -169,7 +167,7 @@ class BaseHandler(CommonRequestHandler):
         hidden_user_restricted = \
             participation.hidden and self.contest.block_hidden_participations
         if ip_login_restricted or hidden_user_restricted:
-            self.clear_cookie("login")
+            self.clear_cookie("session")
             participation = None
 
         return participation
@@ -219,22 +217,16 @@ class BaseHandler(CommonRequestHandler):
             the cookie, or None if not possible.
 
         """
-        if self.get_secure_cookie("login") is None:
+        session_id = self.get_cookie("session")
+        if session_id is None:
             return None
 
-        # Parse cookie.
-        try:
-            cookie = pickle.loads(self.get_secure_cookie("login"))
-            username = cookie[0]
-            password = cookie[1]
-            last_update = make_datetime(cookie[2])
-        except:
+        # Get login info from redis.
+        login_info = get_session(session_id)
+        if login_info is None:
             return None
-
-        # Check if the cookie is expired.
-        if self.timestamp - last_update > \
-                timedelta(seconds=config.cookie_duration):
-            return None
+        username = login_info["username"]
+        used_password = login_info["used_password"]
 
         # Load participation from DB and make sure it exists.
         participation = self.sql_session.query(Participation)\
@@ -249,18 +241,14 @@ class BaseHandler(CommonRequestHandler):
         # Check that the password is correct (if a contest-specific
         # password is defined, use that instead of the user password).
         if participation.password is None:
-            correct_password = participation.user.password
+            correct_used_password = "user"
         else:
-            correct_password = participation.password
-        if password != correct_password:
+            correct_used_password = "participation"
+        if used_password != correct_used_password:
             return None
 
-        if self.refresh_cookie:
-            self.set_secure_cookie("login",
-                                   pickle.dumps((username,
-                                                 password,
-                                                 make_timestamp())),
-                                   expires_days=None)
+        if self.refresh_login:
+            set_session(session_id, login_info)
 
         return participation
 

@@ -237,7 +237,7 @@ class BaseHandler(CommonRequestHandler):
             return None
 
         # Maybe refresh the cookie.
-        if self.refresh_cookie:
+        if self.refresh_login:
             self.service.auth_handler.refresh()
 
         return admin

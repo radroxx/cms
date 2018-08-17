@@ -34,12 +34,13 @@ from __future__ import unicode_literals
 
 import json
 import logging
-import pickle
+from uuid import uuid4
 
 import tornado.web
 
 from cms import config
 from cms.db import Participation, PrintJob, User
+from cms.redis import set_session, delete_session
 from cms.server import actual_phase_required, filter_ascii
 from cmscommon.datetime import make_datetime, make_timestamp
 
@@ -88,8 +89,10 @@ class LoginHandler(BaseHandler):
         # not, use the user's main password.
         if participation.password is None:
             correct_password = user.password
+            used_password = "user"
         else:
             correct_password = participation.password
+            used_password = "participation"
 
         filtered_user = filter_ascii(username)
         filtered_pass = filter_ascii(password)
@@ -114,13 +117,16 @@ class LoginHandler(BaseHandler):
             self.redirect("/?login_error=true")
             return
 
+        session_id = uuid4().hex
+        login_info = {
+            "username": user.username,
+            "used_password": used_password,
+        }
+        set_session(session_id, login_info)
+
         logger.info("User logged in: user=%s remote_ip=%s.",
                     filtered_user, self.request.remote_ip)
-        self.set_secure_cookie("login",
-                               pickle.dumps((user.username,
-                                             correct_password,
-                                             make_timestamp())),
-                               expires_days=None)
+        self.set_cookie("session", session_id, expires_days=None)
         self.redirect(next_page)
 
 
@@ -147,7 +153,10 @@ class LogoutHandler(BaseHandler):
 
     """
     def post(self):
-        self.clear_cookie("login")
+        session_id = self.get_cookie("session")
+        if session_id is not None:
+            delete_session(session_id)
+        self.clear_cookie("session")
         self.redirect("/")
 
 
@@ -156,7 +165,7 @@ class NotificationsHandler(BaseHandler):
 
     """
 
-    refresh_cookie = False
+    refresh_login = False
 
     @tornado.web.authenticated
     def get(self):

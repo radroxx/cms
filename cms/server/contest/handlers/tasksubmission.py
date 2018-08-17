@@ -411,7 +411,7 @@ class TaskSubmissionsHandler(BaseHandler):
 
 class SubmissionStatusHandler(BaseHandler):
 
-    refresh_cookie = False
+    refresh_login = False
 
     @tornado.web.authenticated
     @actual_phase_required(0)
@@ -477,7 +477,7 @@ class SubmissionStatusHandler(BaseHandler):
 
 class SubmissionDetailsHandler(BaseHandler):
 
-    refresh_cookie = False
+    refresh_login = False
 
     @tornado.web.authenticated
     @actual_phase_required(0)

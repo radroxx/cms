@@ -667,10 +667,9 @@ class CommonRequestHandler(RequestHandler):
 
     """
 
-    # Whether the login cookie duration has to be refreshed when
-    # this handler is called. Useful to filter asynchronous
-    # requests.
-    refresh_cookie = True
+    # Whether the login cookie/session duration has to be refreshed when
+    # this handler is called. Useful to filter asynchronous requests.
+    refresh_login = True
 
     def __init__(self, *args, **kwargs):
         super(CommonRequestHandler, self).__init__(*args, **kwargs)
