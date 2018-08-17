@@ -52,6 +52,13 @@
 
 
 
+    "_section": "Redis",
+
+    "_help": "Connection string for the Redis.",
+    "redis": "redis://localhost:6379/0",
+
+
+
     "_section": "Worker",
 
     "_help": "Don't delete the sandbox directory under /tmp/ when they",
@@ -94,9 +101,9 @@
     "contest_listen_address": [""],
     "contest_listen_port":    [8888],
 
-    "_help": "Login cookie duration in seconds. The duration is refreshed",
+    "_help": "Login session duration in seconds. The duration is refreshed",
     "_help": "on every manual request.",
-    "cookie_duration": 10800,
+    "session_duration": 10800,
 
     "_help": "If CWSs write submissions to disk before storing them in",
     "_help": "the DB, and where to save them. %s = DATA_DIR.",

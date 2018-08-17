@@ -122,7 +122,7 @@ class UserTestInterfaceHandler(BaseHandler):
 
 class UserTestHandler(BaseHandler):
 
-    refresh_cookie = False
+    refresh_login = False
 
     # The following code has been taken from SubmitHandler and adapted
     # for UserTests.
@@ -439,7 +439,7 @@ class UserTestHandler(BaseHandler):
 
 class UserTestStatusHandler(BaseHandler):
 
-    refresh_cookie = False
+    refresh_login = False
 
     @tornado.web.authenticated
     @actual_phase_required(0)
@@ -497,7 +497,7 @@ class UserTestStatusHandler(BaseHandler):
 
 class UserTestDetailsHandler(BaseHandler):
 
-    refresh_cookie = False
+    refresh_login = False
 
     @tornado.web.authenticated
     @actual_phase_required(0)
