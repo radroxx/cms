@@ -225,15 +225,15 @@ class BaseHandler(CommonRequestHandler):
         login_info = get_session(session_id)
         if login_info is None:
             return None
-        username = login_info["username"]
-        used_password = login_info["used_password"]
+        user_id = login_info["user_id"]
+        contest_id = login_info["contest_id"]
 
         # Load participation from DB and make sure it exists.
         participation = self.sql_session.query(Participation)\
             .join(Participation.user)\
             .options(contains_eager(Participation.user))\
             .filter(Participation.contest == self.contest)\
-            .filter(User.username == username)\
+            .filter(User.id == user_id)\
             .first()
         if participation is None:
             return None
@@ -241,10 +241,10 @@ class BaseHandler(CommonRequestHandler):
         # Check that the password is correct (if a contest-specific
         # password is defined, use that instead of the user password).
         if participation.password is None:
-            correct_used_password = "user"
+            correct_contest_id = None
         else:
-            correct_used_password = "participation"
-        if used_password != correct_used_password:
+            correct_contest_id = self.contest.id
+        if contest_id != correct_contest_id:
             return None
 
         if self.refresh_login:

@@ -89,10 +89,10 @@ class LoginHandler(BaseHandler):
         # not, use the user's main password.
         if participation.password is None:
             correct_password = user.password
-            used_password = "user"
+            contest_id = None
         else:
             correct_password = participation.password
-            used_password = "participation"
+            contest_id = self.contest.id
 
         filtered_user = filter_ascii(username)
         filtered_pass = filter_ascii(password)
@@ -119,8 +119,8 @@ class LoginHandler(BaseHandler):
 
         session_id = uuid4().hex
         login_info = {
-            "username": user.username,
-            "used_password": used_password,
+            "user_id": user.id,
+            "contest_id": contest_id,
         }
         set_session(session_id, login_info)
 
