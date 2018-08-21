@@ -7,7 +7,7 @@ from __future__ import unicode_literals
 
 import functools
 
-from tornado.web import HTTPError
+from tornado_json.exceptions import APIError
 from tornado_json.requesthandlers import APIHandler
 
 from cms import config
@@ -19,7 +19,7 @@ def authenticated(method):
     def wrapper(self, *args, **kwargs):
         api_key = self.request.headers.get(BaseAPIHandler.API_KEY_HEADER, None)
         if api_key != config.integration_api_key:
-            raise HTTPError(403)
+            raise APIError(403, "Invalid API key.")
         return method(self, *args, **kwargs)
     return wrapper
 
