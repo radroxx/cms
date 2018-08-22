@@ -117,12 +117,11 @@ class LoginHandler(BaseHandler):
             self.redirect("/?login_error=true")
             return
 
-        session_id = uuid4().hex
         login_info = {
             "user_id": user.id,
             "contest_id": contest_id,
         }
-        set_session(session_id, login_info)
+        session_id = set_session(login_info)
 
         logger.info("User logged in: user=%s remote_ip=%s.",
                     filtered_user, self.request.remote_ip)

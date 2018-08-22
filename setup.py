@@ -113,6 +113,7 @@ setup(
              "scripts/cmsChecker",
              "scripts/cmsContestWebServer",
              "scripts/cmsAdminWebServer",
+             "scripts/cmsIntegrationWebServer",
              "scripts/cmsProxyService",
              "scripts/cmsPrintingService",
              "scripts/cmsRankingWebServer",

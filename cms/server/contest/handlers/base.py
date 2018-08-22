@@ -248,7 +248,7 @@ class BaseHandler(CommonRequestHandler):
             return None
 
         if self.refresh_login:
-            set_session(session_id, login_info)
+            set_session(login_info, session_id=session_id)
 
         return participation
 

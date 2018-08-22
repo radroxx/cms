@@ -33,4 +33,9 @@ class BaseAPIHandler(APIHandler):
         self.session = None
 
     def prepare(self):
+        super(BaseAPIHandler, self).prepare()
+
+        if self.request.body == "":
+            self.request.body = "{}"
+
         self.session = ScopedSession()

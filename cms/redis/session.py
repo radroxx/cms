@@ -1,8 +1,13 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
+from __future__ import absolute_import
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import json
 import logging
+from uuid import uuid4
 
 from redis import (
     Redis,
@@ -26,20 +31,24 @@ def redis_decorator(func):
 
 
 @redis_decorator
-def get_session(key):
-    value = cms_redis.get(key)
+def get_session(session_id):
+    value = cms_redis.get(session_id)
     if value is not None:
         value = json.loads(value)
     return value
 
 
 @redis_decorator
-def set_session(key, value, expired=config.session_duration):
+def set_session(value, session_id=None, expired=config.session_duration):
+    if session_id is None:
+        session_id = uuid4().hex
     if value is not None:
         value = json.dumps(value)
-    cms_redis.set(key, value, ex=expired)
+    cms_redis.set(session_id, value, ex=expired)
+    return session_id
 
 
 @redis_decorator
-def delete_session(key):
-    cms_redis.delete(key)
+def delete_session(session_id):
+    cms_redis.delete(session_id)
+    return True
