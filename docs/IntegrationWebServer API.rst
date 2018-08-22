@@ -13,11 +13,11 @@ URL: ``/users/<user_id>``
 
 Method: ``GET``
 
-Query parameters:::
+Query parameters:
 
-    Not required:
+>> Not required:
 
-    * ``contest_id`` - Specify ID of contest if you want to get score info for the user.
+>> * ``contest_id`` - Specify ID of contest if you want to get score info for the user.
 
 JSON schema:
 
