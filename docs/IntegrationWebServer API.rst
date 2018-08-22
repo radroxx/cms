@@ -1,6 +1,11 @@
 IntegrationWebServer API description
 ************************************
 
+Required headers
+================
+
+``x-integration-api-key`` - API secret key used for authorization.
+
 Get user info
 =============
 
@@ -10,7 +15,9 @@ Method: ``GET``
 
 Query parameters:
 
-* ``contest_id`` - Specify ID of contest to get score info for the user. [Not required]
+    Not required:
+
+    * ``contest_id`` - Specify ID of contest if you want to get score info for the user.
 
 JSON schema:
 
@@ -80,6 +87,10 @@ JSON schema:
         }
     }
 
+Notes:
+
+* ``contest_id`` - Specify ID of contest if you want to create new participation in place.
+
 Create new participation
 ========================
 
@@ -135,3 +146,7 @@ JSON schema:
             "session_id": {"type": "string"},
         }
     }
+
+Notes:
+
+* ``contest_id`` - Specify ID of contest if you want to create a contest-specific session.
