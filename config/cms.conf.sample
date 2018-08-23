@@ -26,9 +26,15 @@
                                   ["localhost", 26001],
                                   ["localhost", 26002],
                                   ["localhost", 26003]],
-        "ContestWebServer":      [["localhost", 21000]],
-        "IntegrationWebServer":  [["localhost", 21110]],
-        "AdminWebServer":        [["localhost", 21100]],
+        "ContestWebServer":      [["localhost", 21000],
+                                  ["localhost", 21001],
+                                  ["localhost", 21002],
+                                  ["localhost", 21003]],
+        "IntegrationWebServer":  [["localhost", 21100],
+                                  ["localhost", 21101],
+                                  ["localhost", 21102],
+                                  ["localhost", 21103]],
+        "AdminWebServer":        [["localhost", 21110]],
         "ProxyService":          [["localhost", 28600]],
         "PrintingService":       [["localhost", 25123]]
         },
@@ -99,8 +105,8 @@
     "_help": "in core_services. If you access them through a proxy (acting",
     "_help": "as a load balancer) running on the same host you could put",
     "_help": "127.0.0.1 here for additional security.",
-    "contest_listen_address": [""],
-    "contest_listen_port":    [8888],
+    "contest_listen_address": ["", "", "", ""],
+    "contest_listen_port":    [8880, 8881, 8882, 8883],
 
     "_help": "Login session duration in seconds. The duration is refreshed",
     "_help": "on every manual request.",
@@ -135,8 +141,8 @@
     "_help": "in core_services. If you access them through a proxy (acting",
     "_help": "as a load balancer) running on the same host you could put",
     "_help": "127.0.0.1 here for additional security.",
-    "integration_listen_address": [""],
-    "integration_listen_port":    [8887],
+    "integration_listen_address": ["", "", "", ""],
+    "integration_listen_port":    [8870, 8871, 8872, 8873],
     "integration_api_key": "secret-api-key",
 
 
@@ -147,7 +153,7 @@
     "_help": "it through a proxy running on the same host you could put",
     "_help": "127.0.0.1 here for additional security.",
     "admin_listen_address": "",
-    "admin_listen_port":    8889,
+    "admin_listen_port":    8890,
 
     "_help": "Login cookie duration for admins in seconds.",
     "_help": "The duration is refreshed on every manual request.",
@@ -162,7 +168,7 @@
     "_help": "load balancing proxy (if any), just the backends. If any",
     "_help": "of them uses HTTPS specify a file with the certificates",
     "_help": "you trust.",
-    "rankings": ["http://usern4me:passw0rd@localhost:8890/"],
+    "rankings": ["http://usern4me:passw0rd@localhost:8891/"],
     "https_certfile": null,
 
 

@@ -40,8 +40,22 @@ http {
     upstream cws {
         ip_hash;
         keepalive 500;
-        server 127.0.0.1:8888;
+        server 127.0.0.1:8880;
+        server 127.0.0.1:8881;
+        server 127.0.0.1:8882;
+        server 127.0.0.1:8883;
         # Insert other CWSs here.
+    }
+
+    # Group the IntegrationWebServers to load balance the requests to API
+    # on them.
+    upstream iws {
+        keepalive 32;
+        server 127.0.0.1:8870;
+        server 127.0.0.1:8871;
+        server 127.0.0.1:8872;
+        server 127.0.0.1:8873;
+        # Insert other IWSs here.
     }
 
     # To benefit from kept-alive connections also on AdminWebServer a
@@ -49,7 +63,7 @@ http {
     # just one server.
     upstream aws {
         keepalive 5;
-        server 127.0.0.1:8889;
+        server 127.0.0.1:8890;
     }
 
     # Group the RankingWebServers to load balance among them (useful to
@@ -57,7 +71,7 @@ http {
     # you expect a very large number of clients).
     upstream rws {
         keepalive 500;
-        server 127.0.0.1:8890;
+        server 127.0.0.1:8891;
         # Insert other RWSs here.
     }
 
@@ -131,6 +145,21 @@ http {
 
             # Allow to upload large files (e.g. testcases).
             client_max_body_size 100M;
+        }
+
+        # Serve IWS on a prefix.
+        location ^~ /iws/ {
+            proxy_pass http://iws/;
+            include proxy_params;
+            proxy_redirect http://$host/ /iws/;
+            proxy_redirect https://$host/ /iws/;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            # Protect it with an IP address whitelist.
+            allow 127.0.0.1;
+            # Insert other allowed IP addesses or subnets here.
+            deny all;
         }
 
         # Serve RWS on a prefix.

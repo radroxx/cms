@@ -6,7 +6,7 @@
     "bind_address": "",
 
     "_help": "Listening port for RankingWebServer.",
-    "http_port": 8890,
+    "http_port": 8891,
 
     "_help": "Login information for adding and editing data.",
     "username":   "usern4me",
