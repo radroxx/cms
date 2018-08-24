@@ -9,11 +9,15 @@ Required headers
 Get user info
 =============
 
-URL: ``/users/<user_id>``
+URL: ``/get_user``
 
 Method: ``GET``
 
 Query parameters:
+
+*   Required:
+
+    * ``username`` - Username of the user to retrieve info.
 
 *   Not required:
 
@@ -56,7 +60,7 @@ JSON schema:
 Create new user
 ===============
 
-URL: ``/users``
+URL: ``/create_user``
 
 Method: ``POST``
 
@@ -94,7 +98,7 @@ Notes:
 Create new participation
 ========================
 
-URL: ``/users/<user_id>/participations``
+URL: ``/create_participation``
 
 Method: ``POST``
 
@@ -105,9 +109,10 @@ JSON schema:
     input_schema={
         "type": "object",
         "properties": {
+            "username": {"type": "string"},
             "contest_id": {"type": "integer"},
         },
-        "required": ["contest_id", ]
+        "required": ["username", "contest_id", ]
     }
 
     output_schema={
@@ -120,7 +125,7 @@ JSON schema:
 Create new session for user authentication
 ==========================================
 
-URL: ``/users/<user_id>/sessions``
+URL: ``/create_session``
 
 Method: ``POST``
 
@@ -131,6 +136,7 @@ JSON schema:
     input_schema={
         "type": "object",
         "properties": {
+            "username": {"type": "string"},
             "contest_id": {
                 "anyOf": [
                     {"type": "integer"},
@@ -138,6 +144,7 @@ JSON schema:
                 ],
             },
         },
+        "required": ["username", ]
     }
 
     output_schema={
