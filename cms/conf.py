@@ -104,6 +104,7 @@ class Config(object):
         # necessary to change it.
         # [2] http://freedesktop.org/wiki/Software/shared-mime-info
         self.shared_mime_info_prefix = "/usr"
+        self.session_cookie = "cms_session"
 
         # AdminWebServer.
         self.admin_listen_address = ""

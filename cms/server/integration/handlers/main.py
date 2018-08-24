@@ -6,18 +6,18 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from tornado_json import schema
-from tornado_json.exceptions import APIError
 
-from cms.db import User
 from cms.redis import set_session
 from .base import BaseAPIHandler, authenticated
 from ..logic.user import (
-    create_user, create_participation,
-    get_user_info, get_participation_info,
+    create_user,
+    create_participation,
+    get_user_info,
+    get_participation_info,
 )
 
 
-class UserHandler(BaseAPIHandler):
+class GetUserHandler(BaseAPIHandler):
 
     @authenticated
     @schema.validate(
@@ -51,20 +51,23 @@ class UserHandler(BaseAPIHandler):
             },
         },
     )
-    def get(self, user_id):
-        result = get_user_info(self.session, user_id)
+    def get(self):
+        username = self.get_required_argument("username")
+        user = self.get_user_or_404(username)
 
-        contest_id = self.get_argument('contest_id', None)
+        result = get_user_info(self.session, user)
+
+        contest_id = self.get_argument("contest_id", None)
         if contest_id is None:
             return result
 
         result["contest"] = get_participation_info(
-            self.session, user_id, contest_id)
+            self.session, user, contest_id)
 
         return result
 
 
-class UserListHandler(BaseAPIHandler):
+class CreateUserHandler(BaseAPIHandler):
 
     @authenticated
     @schema.validate(
@@ -91,7 +94,7 @@ class UserListHandler(BaseAPIHandler):
         },
     )
     def post(self):
-        user_id = create_user(
+        user = create_user(
             self.session,
             self.body.get("username", ""),
             self.body.get("first_name", ""),
@@ -101,24 +104,25 @@ class UserListHandler(BaseAPIHandler):
             self.body.get("timezone", None),
             self.body.get("preferred_languages", "[]"),
         )
-        result = {"user_id": user_id}
+        result = {"user_id": user.id}
 
         contest_id = self.body.get("contest_id", None)
         if contest_id is not None:
-            participation_id = create_participation(
-                self.session, user_id, contest_id)
-            result["participation_id"] = participation_id
+            participation = create_participation(
+                self.session, user, contest_id)
+            result["participation_id"] = participation.id
 
         return result
 
 
-class UserSessionsHandler(BaseAPIHandler):
+class CreateUserSessionHandler(BaseAPIHandler):
 
     @authenticated
     @schema.validate(
         input_schema={
             "type": "object",
             "properties": {
+                "username": {"type": "string"},
                 "contest_id": {
                     "anyOf": [
                         {"type": "integer"},
@@ -126,6 +130,7 @@ class UserSessionsHandler(BaseAPIHandler):
                     ],
                 },
             },
+            "required": ["username", ]
         },
         output_schema={
             "type": "object",
@@ -134,13 +139,11 @@ class UserSessionsHandler(BaseAPIHandler):
             }
         },
     )
-    def post(self, user_id):
-        user = self.session.query(User).filter(User.id == user_id).first()
-        if user is None:
-            raise APIError(404, "User not found.")
+    def post(self):
+        user = self.get_user_or_404(self.body["username"])
 
         login_info = {
-            "user_id": user_id,
+            "user_id": user.id,
             "contest_id": self.body.get("contest_id", None),
         }
         session_id = set_session(login_info)
@@ -148,16 +151,17 @@ class UserSessionsHandler(BaseAPIHandler):
         return {"session_id": session_id}
 
 
-class UserParticipationsHandler(BaseAPIHandler):
+class CreateUserParticipationHandler(BaseAPIHandler):
 
     @authenticated
     @schema.validate(
         input_schema={
             "type": "object",
             "properties": {
+                "username": {"type": "string"},
                 "contest_id": {"type": "integer"},
             },
-            "required": ["contest_id", ]
+            "required": ["username", "contest_id", ]
         },
         output_schema={
             "type": "object",
@@ -166,8 +170,8 @@ class UserParticipationsHandler(BaseAPIHandler):
             }
         },
     )
-    def post(self, user_id):
-        participation_id = create_participation(
-            self.session, user_id, self.body["contest_id"])
+    def post(self):
+        participation = create_participation(
+            self.session, self.body["username"], self.body["contest_id"])
 
-        return {"participation_id": participation_id}
+        return {"participation_id": participation.id}

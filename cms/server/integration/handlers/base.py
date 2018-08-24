@@ -7,11 +7,13 @@ from __future__ import unicode_literals
 
 import functools
 
+from tornado.web import MissingArgumentError
 from tornado_json.exceptions import APIError
 from tornado_json.requesthandlers import APIHandler
 
 from cms import config
 from cms.db import ScopedSession
+from ..logic.user import get_user_or_404
 
 
 def authenticated(method):
@@ -39,3 +41,12 @@ class BaseAPIHandler(APIHandler):
             self.request.body = "{}"
 
         self.session = ScopedSession()
+
+    def get_required_argument(self, name):
+        try:
+            return self.get_argument(name)
+        except MissingArgumentError:
+            raise APIError(400, "Query argument \"{}\" required.".format(name))
+
+    def get_user_or_404(self, username):
+        return get_user_or_404(self.session, username)

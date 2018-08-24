@@ -125,7 +125,7 @@ class LoginHandler(BaseHandler):
 
         logger.info("User logged in: user=%s remote_ip=%s.",
                     filtered_user, self.request.remote_ip)
-        self.set_cookie("session", session_id, expires_days=None)
+        self.set_cookie(config.session_cookie, session_id, expires_days=None)
         self.redirect(next_page)
 
 
@@ -152,10 +152,10 @@ class LogoutHandler(BaseHandler):
 
     """
     def post(self):
-        session_id = self.get_cookie("session")
+        session_id = self.get_cookie(config.session_cookie)
         if session_id is not None:
             delete_session(session_id)
-        self.clear_cookie("session")
+        self.clear_cookie(config.session_cookie)
         self.redirect("/")
 
 

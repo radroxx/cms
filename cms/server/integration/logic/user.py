@@ -13,6 +13,14 @@ from cms.db import User, Contest, Participation, Task
 from cms.grading import task_score
 
 
+def get_user_or_404(session, username):
+    user = session.query(User).filter(User.username == username).first()
+    if user is None:
+        raise APIError(404, "User not found.")
+
+    return user
+
+
 def create_user(session, username, first_name="", last_name="", password="",
                 email=None, timezone=None, preferred_languages="[]"):
     user = session.query(User).filter(User.username == username).first()
@@ -31,36 +39,34 @@ def create_user(session, username, first_name="", last_name="", password="",
     session.add(user)
     session.commit()
 
-    return user.id
+    return user
 
 
-def create_participation(session, user_id, contest_id):
+def create_participation(session, user, contest_id):
+    if not isinstance(user, User):
+        user = get_user_or_404(session, user)
+
     contest = session.query(Contest).filter(Contest.id == contest_id).first()
     if contest is None:
         raise APIError(404, "Contest not found.")
 
-    user = session.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise APIError(404, "User not found.")
-
     participation = session.query(Participation).filter(
-        and_(Participation.user_id == user_id,
-             Participation.contest_id == contest_id)).first()
+        and_(Participation.user_id == user.id,
+             Participation.contest_id == contest.id)).first()
     if participation is not None:
-        raise APIError(409, "Participation with such user_id and contest_id "
+        raise APIError(409, "Participation with such username and contest_id "
                             "already exist.")
 
     participation = Participation(contest=contest, user=user)
     session.add(participation)
     session.commit()
 
-    return participation.id
+    return participation
 
 
-def get_user_info(session, user_id):
-    user = session.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise APIError(404, "User not found.")
+def get_user_info(session, user):
+    if not isinstance(user, User):
+        user = get_user_or_404(session, user)
 
     data = {
         "user_id": user.id,
@@ -75,13 +81,16 @@ def get_user_info(session, user_id):
     return data
 
 
-def get_participation_info(session, user_id, contest_id):
+def get_participation_info(session, user, contest_id):
+    if not isinstance(user, User):
+        user = get_user_or_404(session, user)
+
     participation = session.query(Participation).filter(
         and_(Participation.contest_id == contest_id,
-             Participation.user_id == user_id)).options(
-        joinedload('submissions')).options(
-        joinedload('submissions.token')).options(
-        joinedload('submissions.results')).first()
+             Participation.user_id == user.id)).options(
+        joinedload("submissions")).options(
+        joinedload("submissions.token")).options(
+        joinedload("submissions.results")).first()
     if participation is None:
         raise APIError(404, "Participation not found.")
 

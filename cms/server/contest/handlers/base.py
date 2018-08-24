@@ -147,7 +147,7 @@ class BaseHandler(CommonRequestHandler):
                 participation = self._get_current_user_from_ip()
                 # If the login is IP-based, we delete previous cookies.
                 if participation is not None:
-                    self.clear_cookie("session")
+                    self.clear_cookie(config.session_cookie)
             except RuntimeError:
                 return None
 
@@ -156,7 +156,7 @@ class BaseHandler(CommonRequestHandler):
             participation = self._get_current_user_from_cookie()
 
         if participation is None:
-            self.clear_cookie("session")
+            self.clear_cookie(config.session_cookie)
             return None
 
         # Check if user is using the right IP (or is on the right subnet),
@@ -167,7 +167,7 @@ class BaseHandler(CommonRequestHandler):
         hidden_user_restricted = \
             participation.hidden and self.contest.block_hidden_participations
         if ip_login_restricted or hidden_user_restricted:
-            self.clear_cookie("session")
+            self.clear_cookie(config.session_cookie)
             participation = None
 
         return participation
@@ -217,7 +217,7 @@ class BaseHandler(CommonRequestHandler):
             the cookie, or None if not possible.
 
         """
-        session_id = self.get_cookie("session")
+        session_id = self.get_cookie(config.session_cookie)
         if session_id is None:
             return None
 

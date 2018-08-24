@@ -6,16 +6,16 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from .main import (
-    UserHandler,
-    UserListHandler,
-    UserSessionsHandler,
-    UserParticipationsHandler,
+    GetUserHandler,
+    CreateUserHandler,
+    CreateUserSessionHandler,
+    CreateUserParticipationHandler,
 )
 
 
 HANDLERS = [
-    (r"/users", UserListHandler),
-    (r"/users/([0-9]+)", UserHandler),
-    (r"/users/([0-9]+)/sessions", UserSessionsHandler),
-    (r"/users/([0-9]+)/participations", UserParticipationsHandler),
+    (r"/get_user", GetUserHandler),
+    (r"/create_user", CreateUserHandler),
+    (r"/create_session", CreateUserSessionHandler),
+    (r"/create_participation", CreateUserParticipationHandler),
 ]

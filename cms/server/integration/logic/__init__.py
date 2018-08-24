@@ -6,10 +6,18 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from .user import (
-    get_user_info, get_participation_info,
-    create_user, create_participation,
+    get_user_or_404,
+    get_user_info,
+    get_participation_info,
+    create_user,
+    create_participation,
 )
 
 
-__all__ = ["get_user_info", "get_participation_info",
-           "create_user", "create_participation"]
+__all__ = [
+    "get_user_or_404",
+    "get_user_info",
+    "get_participation_info",
+    "create_user",
+    "create_participation",
+]
