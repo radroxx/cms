@@ -1106,3 +1106,6 @@ msgstr "テストの詳細"
 
 msgid "Evaluation outcome"
 msgstr "実行結果"
+
+msgid "Account"
+msgstr "アカウント"

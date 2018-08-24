@@ -1129,3 +1129,6 @@ msgstr "Detalles de test"
 
 msgid "Evaluation outcome"
 msgstr "Resultado de la evaluación"
+
+msgid "Account"
+msgstr "Cuenta"

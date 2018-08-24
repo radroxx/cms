@@ -1093,6 +1093,9 @@ msgstr "테스트 세부 사항"
 msgid "Evaluation outcome"
 msgstr "실행 결과"
 
+msgid "Account"
+msgstr "계정"
+
 #~ msgid "All sources must be in the same language."
 #~ msgstr "모든 소스들은 동일한 프로그래밍 언어를 사용하여야 합니다."
 

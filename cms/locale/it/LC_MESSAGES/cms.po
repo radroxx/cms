@@ -1127,5 +1127,8 @@ msgstr "Dettagli del test"
 msgid "Evaluation outcome"
 msgstr "Valutazione"
 
+msgid "Account"
+msgstr "Account"
+
 #~ msgid "All sources must be in the same language."
 #~ msgstr "Tutti i sorgenti devono essere nello stesso linguaggio."

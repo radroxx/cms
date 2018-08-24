@@ -1023,3 +1023,6 @@ msgstr "Testi andmed"
 
 msgid "Evaluation outcome"
 msgstr "Testimise tulemus"
+
+msgid "Account"
+msgstr "Konto"

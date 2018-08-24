@@ -923,3 +923,6 @@ msgstr "Детали теста"
 
 msgid "Evaluation outcome"
 msgstr "Результат проверки"
+
+msgid "Account"
+msgstr "Аккаунт"

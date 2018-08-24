@@ -1047,3 +1047,6 @@ msgstr "Детайли за теста"
 
 msgid "Evaluation outcome"
 msgstr "Резултат от оценяването"
+
+msgid "Account"
+msgstr "Сметка"

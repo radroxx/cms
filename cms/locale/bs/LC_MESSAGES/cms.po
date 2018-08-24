@@ -840,3 +840,6 @@ msgstr "Detalji testa"
 
 msgid "Evaluation outcome"
 msgstr "Ishod evaluacije"
+
+msgid "Account"
+msgstr "Račun"

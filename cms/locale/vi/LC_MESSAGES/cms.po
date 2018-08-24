@@ -1100,5 +1100,8 @@ msgstr "Chi tiết chạy thử"
 msgid "Evaluation outcome"
 msgstr "Kết quả chấm"
 
+msgid "Account"
+msgstr "Tài khoản"
+
 #~ msgid "All sources must be in the same language."
 #~ msgstr "Tất cả mã nguồn cần sử dụng chung một ngôn ngữ."

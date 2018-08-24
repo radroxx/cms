@@ -1058,5 +1058,8 @@ msgstr "测试详细资料"
 msgid "Evaluation outcome"
 msgstr "测试信息"
 
+msgid "Account"
+msgstr "帐户"
+
 #~ msgid "All sources must be in the same language."
 #~ msgstr "所有程序码需使用相同的程序语言"

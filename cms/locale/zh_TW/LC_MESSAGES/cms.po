@@ -867,3 +867,6 @@ msgstr "測試詳細資料"
 
 msgid "Evaluation outcome"
 msgstr "測試訊息"
+
+msgid "Account"
+msgstr "帳戶"

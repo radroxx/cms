@@ -999,3 +999,6 @@ msgstr "Podrobnosti preizkusa"
 
 msgid "Evaluation outcome"
 msgstr "Rezultat ovrednotenja"
+
+msgid "Account"
+msgstr "Račun"
