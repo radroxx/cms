@@ -458,7 +458,7 @@ msgid "Failed to log in."
 msgstr "Неудачный вход."
 
 msgid "Welcome"
-msgstr "Добро пожаловать."
+msgstr "Добро пожаловать"
 
 msgid "Please log in"
 msgstr "Пожалуйста авторизуйтесь"

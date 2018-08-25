@@ -81,8 +81,8 @@ class Config(object):
 
         # ContestWebServer.
         self.contest_listen_address = [""]
-        self.contest_listen_port = [8888]
-        self.session_duration = 10800
+        self.contest_listen_port = [8880]
+        self.session_duration = 3 * 60 * 60  # 3 hours
         self.submit_local_copy = True
         self.submit_local_copy_path = "%s/submissions/"
         self.tests_local_copy = True
@@ -106,13 +106,18 @@ class Config(object):
         self.shared_mime_info_prefix = "/usr"
         self.session_cookie = "cms_session"
 
+        # IntegrationWebServer.
+        self.integration_listen_address = [""]
+        self.integration_listen_port = [8870]
+        self.integration_api_key = "secret-api-key"
+
         # AdminWebServer.
         self.admin_listen_address = ""
-        self.admin_listen_port = 8889
+        self.admin_listen_port = 8890
         self.admin_cookie_duration = 10 * 60 * 60  # 10 hours
 
         # ProxyService.
-        self.rankings = ["http://usern4me:passw0rd@localhost:8890/"]
+        self.rankings = ["http://usern4me:passw0rd@localhost:8891/"]
         self.https_certfile = None
 
         # PrintingService
