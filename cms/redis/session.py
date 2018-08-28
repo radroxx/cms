@@ -7,7 +7,6 @@ from __future__ import unicode_literals
 
 import json
 import logging
-from uuid import uuid4
 
 from redis import (
     Redis,
@@ -16,6 +15,8 @@ from redis import (
 )
 
 from cms import config
+from cmscommon.crypto import get_hex_random_key
+
 
 logger = logging.getLogger(__name__)
 cms_redis = Redis().from_url(config.redis)
@@ -41,7 +42,7 @@ def get_session(session_id):
 @redis_decorator
 def set_session(value, session_id=None, expired=config.session_duration):
     if session_id is None:
-        session_id = uuid4().hex
+        session_id = get_hex_random_key()
     if value is not None:
         value = json.dumps(value)
     cms_redis.set(session_id, value, ex=expired)
