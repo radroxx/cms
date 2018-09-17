@@ -42,6 +42,25 @@ def create_user(session, username, first_name="", last_name="", password="",
     return user
 
 
+def change_user(session, user, username, first_name="", last_name="", password="",
+                email=None, timezone=None, preferred_languages="[]"):
+    new_user = session.query(User).filter(User.username == username).first()
+    if new_user is not None:
+        raise APIError(409, "User with such username already exist.")
+
+    user.username = username
+    user.first_name = first_name
+    user.last_name = last_name
+    user.password = password
+    user.email = email
+    user.timezone = timezone
+    user.preferred_languages = preferred_languages
+    session.add(user)
+    session.commit()
+
+    return user
+
+
 def create_participation(session, user, contest_id):
     if not isinstance(user, User):
         user = get_user_or_404(session, user)

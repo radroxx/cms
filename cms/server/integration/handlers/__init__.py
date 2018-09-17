@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 from .main import (
     GetUserHandler,
     CreateUserHandler,
+    ChangeUserHandler,
     CreateUserSessionHandler,
     CreateUserParticipationHandler,
 )
@@ -16,6 +17,7 @@ from .main import (
 HANDLERS = [
     (r"/get_user", GetUserHandler),
     (r"/create_user", CreateUserHandler),
+    (r"/change_user", ChangeUserHandler),
     (r"/create_session", CreateUserSessionHandler),
     (r"/create_participation", CreateUserParticipationHandler),
 ]

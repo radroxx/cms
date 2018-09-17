@@ -95,6 +95,44 @@ Notes:
 
 * ``contest_id`` - Specify ID of contest if you want to create new participation in place.
 
+Change user
+===========
+
+URL: ``/change_user``
+
+Method: ``PATCH``
+
+JSON schema:
+
+.. sourcecode:: python
+
+    input_schema={
+        "type": "object",
+        "properties": {
+            "first_name": {"type": "string"},
+            "last_name": {"type": "string"},
+            "username": {"type": "string"},
+            "new_username": {"type": "string"},
+            "password": {"type": "string"},
+            "email": {"type": "string"},
+            "timezone": {"type": "string"},
+            "preferred_languages": {"type": "string"},
+        },
+        "required": ["username", ]
+    }
+
+    output_schema={
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "integer"},
+        }
+    }
+
+Notes:
+
+* ``username`` - Specify current username.
+* ``new_username`` - Specify new username if you want to change username.
+
 Create new participation
 ========================
 
