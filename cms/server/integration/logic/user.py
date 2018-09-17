@@ -44,9 +44,10 @@ def create_user(session, username, first_name="", last_name="", password="",
 
 def change_user(session, user, username, first_name="", last_name="", password="",
                 email=None, timezone=None, preferred_languages="[]"):
-    new_user = session.query(User).filter(User.username == username).first()
-    if new_user is not None:
-        raise APIError(409, "User with such username already exist.")
+    if user.username != username:
+        new_user = session.query(User).filter(User.username == username).first()
+        if new_user is not None:
+            raise APIError(409, "User with such username already exist.")
 
     user.username = username
     user.first_name = first_name
