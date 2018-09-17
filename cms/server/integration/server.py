@@ -7,7 +7,7 @@ from __future__ import unicode_literals
 
 import logging
 
-from cms import ConfigError, config
+from cms import config, ServiceCoord, ConfigError
 from cms.io import WebService
 
 from .handlers import HANDLERS
@@ -40,3 +40,8 @@ class IntegrationWebServer(WebService):
             shard=shard,
             listen_address=listen_address
         )
+
+        ranking_enabled = len(config.rankings) > 0
+        self.proxy_service = self.connect_to(
+            ServiceCoord("ProxyService", 0),
+            must_be_present=ranking_enabled)
