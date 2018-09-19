@@ -80,7 +80,7 @@ class Config(object):
         self.tornado_debug = False
 
         # ContestWebServer.
-        self.contest_login_url = "/"
+        self.contest_login_url = "/login"
         self.contest_listen_address = [""]
         self.contest_listen_port = [8880]
         self.session_duration = 3 * 60 * 60  # 3 hours

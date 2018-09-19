@@ -63,6 +63,9 @@ class LoginHandler(BaseHandler):
     """Login handler.
 
     """
+    def get(self):
+        self.render("overview.html", **self.r_params)
+
     def post(self):
         username = self.get_argument("username", "")
         password = self.get_argument("password", "")
