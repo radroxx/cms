@@ -34,7 +34,6 @@ from __future__ import unicode_literals
 
 import json
 import logging
-from uuid import uuid4
 
 import tornado.web
 
