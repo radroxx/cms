@@ -33,6 +33,7 @@ import time
 import logging
 from datetime import datetime, timedelta
 from urllib import quote
+from urlparse import urlparse
 
 from functools import wraps
 from tornado.web import RequestHandler
@@ -693,14 +694,19 @@ class CommonRequestHandler(RequestHandler):
         return self.application.service
 
     def redirect(self, url):
-        url = get_url_root(self.request.path) + url
+        if urlparse(url).netloc:
+            # Use tornado.web.RequestHandler.redirect if absolute URL is specified.
 
-        # We would prefer to just use this:
-        #   tornado.web.RequestHandler.redirect(self, url)
-        # but unfortunately that assumes it knows the full path to the current
-        # page to generate an absolute URL. This may not be the case if we are
-        # hidden behind a proxy which is remapping part of its URL space to us.
+            super(CommonRequestHandler, self).redirect(url)
+        else:
+            url = get_url_root(self.request.path) + url
 
-        self.set_status(302)
-        self.set_header("Location", url)
-        self.finish()
+            # We would prefer to just use this:
+            #   tornado.web.RequestHandler.redirect(self, url)
+            # but unfortunately that assumes it knows the full path to the current
+            # page to generate an absolute URL. This may not be the case if we are
+            # hidden behind a proxy which is remapping part of its URL space to us.
+
+            self.set_status(302)
+            self.set_header("Location", url)
+            self.finish()

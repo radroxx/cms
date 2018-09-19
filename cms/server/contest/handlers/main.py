@@ -54,6 +54,7 @@ class MainHandler(BaseHandler):
     """Home page handler.
 
     """
+    @tornado.web.authenticated
     def get(self):
         self.render("overview.html", **self.r_params)
 

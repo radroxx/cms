@@ -63,7 +63,7 @@ class ContestWebServer(WebService):
     """
     def __init__(self, shard, contest):
         parameters = {
-            "login_url": "/",
+            "login_url": config.contest_login_url,
             "template_path": pkg_resources.resource_filename(
                 "cms.server.contest", "templates"),
             "static_files": [("cms.server", "static"),

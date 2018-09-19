@@ -101,6 +101,9 @@
 
     "_section": "ContestWebServer",
 
+    "_help": "You may redefine login URL here",
+    "contest_login_url": "/",
+
     "_help": "Listening HTTP addresses and ports for the CWSs listed above",
     "_help": "in core_services. If you access them through a proxy (acting",
     "_help": "as a load balancer) running on the same host you could put",
