@@ -157,6 +157,7 @@ class ChangeUserHandler(BaseAPIHandler):
             self.body.get("preferred_languages", user.preferred_languages),
         )
         result = {"user_id": user.id}
+        self.application.service.proxy_service.reinitialize()
 
         return result
 
