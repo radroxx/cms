@@ -47,7 +47,7 @@ from cms import config, TOKEN_MODE_MIXED
 from cms.db import Contest, Submission, Task, UserTest
 from cms.server import FileHandlerMixin
 from cms.locale import filter_language_codes
-from cms.server.contest.authentication import authenticate_request
+from cms.server.contest.authentication import authenticate_request, refresh_login
 from cmscommon.datetime import get_timezone
 
 from ..phase_management import compute_actual_phase
@@ -148,8 +148,7 @@ class ContestHandler(BaseHandler):
             user logged in for the running contest.
 
         """
-        cookie_name = self.contest.name + "_login"
-        cookie = self.get_secure_cookie(cookie_name)
+        cookie = self.get_cookie(config.session_cookie)
 
         try:
             # In py2 Tornado gives us the IP address as a native binary
@@ -164,9 +163,10 @@ class ContestHandler(BaseHandler):
             self.sql_session, self.contest, self.timestamp, cookie, ip_address)
 
         if cookie is None:
-            self.clear_cookie(cookie_name)
-        elif self.refresh_cookie:
-            self.set_secure_cookie(cookie_name, cookie, expires_days=None)
+            self.clear_cookie(config.session_cookie)
+        elif self.refresh_login:
+            refresh_login(cookie)
+            self.set_cookie(config.session_cookie, cookie, expires_days=None)
 
         return participation
 

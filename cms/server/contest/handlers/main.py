@@ -44,9 +44,8 @@ import tornado.web
 from cms import config
 from cms.db import PrintJob
 from cms.grading.steps import COMPILATION_MESSAGES, EVALUATION_MESSAGES
-from cms.redis import set_session, delete_session
 from cms.server import multi_contest
-from cms.server.contest.authentication import validate_login
+from cms.server.contest.authentication import validate_login, invalidate_login
 from cms.server.contest.communication import get_communications
 from cms.server.contest.printing import accept_print_job, PrintingDisabled, \
     UnacceptablePrintJob
@@ -104,15 +103,14 @@ class LoginHandler(ContestHandler):
                            self.request.remote_ip)
             return None
 
-        participation, login_info = validate_login(
+        participation, cookie = validate_login(
             self.sql_session, self.contest, self.timestamp, username, password,
             ip_address)
 
-        if login_info is None:
+        if cookie is None:
             self.clear_cookie(config.session_cookie)
         else:
-            session_id = set_session(login_info)
-            self.set_cookie(config.session_cookie, session_id, expires_days=None)
+            self.set_cookie(config.session_cookie, cookie, expires_days=None)
 
         if participation is None:
             self.redirect(error_page)
@@ -145,9 +143,8 @@ class LogoutHandler(ContestHandler):
     """
     @multi_contest
     def post(self):
-        session_id = self.get_cookie(config.session_cookie)
-        if session_id is not None:
-            delete_session(session_id)
+        cookie = self.get_cookie(config.session_cookie)
+        invalidate_login(cookie)
         self.clear_cookie(config.session_cookie)
         self.redirect(self.contest_url())
 

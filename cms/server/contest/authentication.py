@@ -34,19 +34,17 @@ from future.builtins.disabled import *  # noqa
 from future.builtins import *  # noqa
 
 import ipaddress
-import json
 import logging
-from datetime import timedelta
 
 from sqlalchemy.orm import contains_eager, joinedload
 
 from cms import config
 from cms.db import Participation, User
+from cms.redis import set_session, delete_session, get_session
 from cmscommon.crypto import validate_password
-from cmscommon.datetime import make_datetime, make_timestamp
 
 
-__all__ = ["validate_login", "authenticate_request"]
+__all__ = ["validate_login", "authenticate_request", "invalidate_login", "refresh_login"]
 
 
 logger = logging.getLogger(__name__)
@@ -64,6 +62,18 @@ def get_password(participation):
         return participation.user.password
     else:
         return participation.password
+
+
+def get_login_info(contest, participation):
+    if participation.password is None:
+        contest_id = None
+    else:
+        contest_id = contest.id
+
+    return {
+        "user_id": participation.user.id,
+        "contest_id": contest_id,
+    }
 
 
 def validate_login(
@@ -143,11 +153,20 @@ def validate_login(
                 "contest %s, at %s", ip_address, username, contest.name,
                 timestamp)
 
-    # If hashing is used, the cookie stores the hashed password so that
-    # the expensive bcrypt call doesn't need to be done at every request.
-    return (participation,
-            json.dumps([username, correct_password, make_timestamp(timestamp)])
-                .encode("utf-8"))
+    login_info = get_login_info(contest, participation)
+    cookie = set_session(login_info)
+
+    return participation, cookie
+
+
+def invalidate_login(cookie):
+    if cookie is not None:
+        delete_session(cookie)
+
+
+def refresh_login(cookie):
+    login_info = get_session(cookie)
+    set_session(login_info, session_id=cookie)
 
 
 class AmbiguousIPAddress(Exception):
@@ -311,54 +330,50 @@ def _authenticate_request_from_cookie(sql_session, contest, timestamp, cookie):
         logger.info("Unsuccessful cookie authentication: no cookie provided")
         return None, None
 
-    # Parse cookie.
+    login_info = get_session(cookie)
+    # Check if the session is expired.
+    if login_info is None:
+        logger.info(
+            "Unsuccessful cookie authentication, at %s: session expired (%d seconds)",
+            timestamp, config.session_duration,
+        )
+        return None, None
+
+    # Parse login_info.
     try:
-        cookie = json.loads(cookie.decode("utf-8"))
-        username = cookie[0]
-        password = cookie[1]
-        last_update = make_datetime(cookie[2])
+        user_id = login_info["user_id"]
+        contest_id = login_info["contest_id"]
     except Exception as e:
-        # Cookies are stored securely and thus cannot be tampered with:
+        # Login info is stored securely and thus cannot be tampered with:
         # this is either a programming or a configuration error.
-        logger.warning("Invalid cookie (%s): %s", e, cookie)
+        logger.warning("Invalid login info (%s): %s", e, login_info)
         return None, None
 
     def log_failed_attempt(msg, *args):
-        logger.info("Unsuccessful cookie authentication as %r, returning from "
-                    "%s, at %s: " + msg, username, last_update, timestamp,
-                    *args)
-
-    # Check if the cookie is expired.
-    if timestamp - last_update > timedelta(seconds=config.cookie_duration):
-        log_failed_attempt("cookie expired (lasts %d seconds)",
-                           config.cookie_duration)
-        return None, None
+        logger.info(
+            "Unsuccessful cookie authentication as user_id=%d, at %s: " + msg,
+            user_id, timestamp, *args,
+        )
 
     # Load participation from DB and make sure it exists.
     participation = sql_session.query(Participation) \
         .join(Participation.user) \
         .options(contains_eager(Participation.user)) \
         .filter(Participation.contest == contest) \
-        .filter(User.username == username) \
+        .filter(User.id == user_id) \
         .first()
     if participation is None:
         log_failed_attempt("user not registered to contest")
         return None, None
 
-    correct_password = get_password(participation)
-
-    # We compare hashed password because it would be too expensive to
-    # re-hash the user-provided plaintext password at every request.
-    if password != correct_password:
+    correct_contest_id = get_login_info(contest, participation)["contest_id"]
+    if contest_id != correct_contest_id:
         log_failed_attempt("wrong password")
         return None, None
 
-    logger.info("Successful cookie authentication as user %r, on contest %s, "
-                "returning from %s, at %s", username, contest.name, last_update,
-                timestamp)
+    logger.info(
+        "Successful cookie authentication as user_id=%d, on contest %s, at %s",
+        user_id, contest.name, timestamp,
+    )
 
-    # We store the hashed password (if hashing is used) so that the
-    # expensive bcrypt hashing doesn't need to be done at every request.
-    return (participation,
-            json.dumps([username, correct_password, make_timestamp(timestamp)])
-                .encode("utf-8"))
+    return participation, cookie
