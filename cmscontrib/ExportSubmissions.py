@@ -1,9 +1,10 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2015-2016 William Di Luigi <williamdiluigi@gmail.com>
 # Copyright © 2016-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2017 Myungwoo Chun <mc.tamaki@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -23,14 +24,18 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iteritems
 
 import argparse
+import io
 import logging
 import os
 import sys
-import codecs
 
 from cms import utf8_decoder
 from cms.db import Dataset, File, FSObject, Participation, SessionGen, \
@@ -41,6 +46,9 @@ from cms.grading import languagemanager
 logger = logging.getLogger(__name__)
 
 
+# Templates for the comment at the beginning of the exported submission.
+# Note that output only submissions will contain an initial, C-style formatted
+# comment, so to recover the original file one will need to use tail -n +6.
 _RAW_TEMPLATE_DATA = """
 * user:  %s
 * fname: %s
@@ -49,8 +57,6 @@ _RAW_TEMPLATE_DATA = """
 * score: %s
 * date:  %s
 """
-
-
 TEMPLATE = {
     ".c": "/**%s*/\n" % _RAW_TEMPLATE_DATA,
     ".pas": "(**%s*)\n" % _RAW_TEMPLATE_DATA,
@@ -60,6 +66,7 @@ TEMPLATE = {
 }
 TEMPLATE[".cpp"] = TEMPLATE[".c"]
 TEMPLATE[".java"] = TEMPLATE[".c"]
+TEMPLATE[".txt"] = TEMPLATE[".c"]
 
 
 def filter_top_scoring(results, unique):
@@ -86,7 +93,7 @@ def filter_top_scoring(results, unique):
                 usertask[key].append(value)
 
     results = []
-    for key, values in usertask.iteritems():
+    for key, values in iteritems(usertask):
         for value in values:
             results.append(value[2])  # the "old" row
 
@@ -98,7 +105,8 @@ def main():
 
     """
     parser = argparse.ArgumentParser(
-        description="Export CMS submissions to a folder.")
+        description="Export CMS submissions to a folder.\n",
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("-c", "--contest-id", action="store", type=int,
                         help="id of contest (default: all contests)")
     parser.add_argument("-t", "--task-id", action="store", type=int,
@@ -118,9 +126,16 @@ def main():
                              " less than this (default: 0.0)",
                         default=0.0)
     parser.add_argument("--filename", action="store", type=utf8_decoder,
-                        help="the filename format to use"
-                             " (default: {id}.{name}{ext})",
-                        default="{id}.{name}{ext}")
+                        help="the filename format to use\n"
+                             "Variables:\n"
+                             "  id: submission id\n"
+                             "  file: filename without extension\n"
+                             "  ext: filename extension\n"
+                             "  time: submission timestamp\n"
+                             "  user: username\n"
+                             "  task: taskname\n"
+                             " (default: {id}.{file}{ext})",
+                        default="{id}.{file}{ext}")
     parser.add_argument("output_dir", action="store", type=utf8_decoder,
                         help="directory where to save the submissions")
 
@@ -181,25 +196,39 @@ def main():
             results = filter_top_scoring(results, args.unique)
 
         print("%s file(s) will be created." % len(results))
-        if raw_input("Continue? [Y/n] ").lower() not in ["y", ""]:
-            sys.exit(0)
+        if input("Continue? [Y/n] ").strip().lower() not in ["y", ""]:
+            return 0
 
         done = 0
         for row in results:
             s_id, s_language, s_timestamp, sr_score, f_filename, f_digest, \
                 u_id, u_name, u_fname, u_lname, t_id, t_name = row
 
-            name = f_filename
-            if name.endswith(".%l"):
-                name = name[:-3]  # remove last 3 chars
-            ext = languagemanager.get_language(s_language).source_extension
+            timef = s_timestamp.strftime('%Y%m%dT%H%M%S')
 
-            filename = args.filename.format(id=s_id, name=name, ext=ext,
-                                            time=s_timestamp, user=u_name)
+            ext = languagemanager.get_language(s_language).source_extension \
+                if s_language else '.txt'
+            filename_base, filename_ext = os.path.splitext(
+                f_filename.replace('.%l', ext)
+            )
+
+            # "name" is a deprecated specifier with the same meaning as "file"
+            filename = args.filename.format(id=s_id, file=filename_base,
+                                            name=filename_base,
+                                            ext=filename_ext,
+                                            time=timef, user=u_name,
+                                            task=t_name)
             filename = os.path.join(args.output_dir, filename)
             if os.path.exists(filename):
                 logger.warning("Skipping file '%s' because it already exists",
                                filename)
+                continue
+            filedir = os.path.dirname(filename)
+            if not os.path.exists(filedir):
+                os.makedirs(filedir)
+            if not os.path.isdir(filedir):
+                logger.warning("%s is not a directory, skipped.", filedir)
+                continue
 
             fso = FSObject.get_from_digest(f_digest, session)
             assert fso is not None
@@ -226,11 +255,11 @@ def main():
                         ) + data
 
                     # Print utf8-encoded, possibly altered data
-                    with codecs.open(filename, "w", encoding="utf-8") as f_out:
+                    with io.open(filename, "wt", encoding="utf-8") as f_out:
                         f_out.write(data)
                 else:
                     # Print raw, untouched binary data
-                    with open(filename, "wb") as f_out:
+                    with io.open(filename, "wb") as f_out:
                         f_out.write(data)
 
             done += 1

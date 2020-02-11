@@ -1,9 +1,11 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Programming contest management system
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
-# Copyright © 2014 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2014-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2018 Edoardo Morassutto <edoardo.morassutto@gmail.com>
+# Copyright © 2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -19,14 +21,18 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iteritems
 
-import json
+import imp
 import io
 import logging
 import os
-import sys
+import subprocess
 
 from datetime import datetime
 from datetime import timedelta
@@ -34,8 +40,8 @@ from datetime import timedelta
 import xml.etree.ElementTree as ET
 
 from cms import config
-from cms.db import Contest, User, Task, Statement, \
-    SubmissionFormatElement, Dataset, Manager, Testcase
+from cms.db import Contest, User, Task, Statement, Dataset, Manager, Testcase
+from cmscommon.crypto import build_password
 from cmscontrib import touch
 
 from .base_loader import ContestLoader, TaskLoader, UserLoader
@@ -114,25 +120,23 @@ class PolygonTaskLoader(TaskLoader):
         root = tree.getroot()
 
         args["name"] = name
-        args["title"] = root.find('names').find("name").attrib['value']
+        args["title"] = str(root.find('names').find("name").attrib['value'])
 
         if get_statement:
-            args["statements"] = []
+            args["statements"] = {}
             args["primary_statements"] = []
-            for language, language_code in LANGUAGE_MAP.iteritems():
+            for language, lang in iteritems(LANGUAGE_MAP):
                 path = os.path.join(self.path, 'statements',
                                     '.pdf', language, 'problem.pdf')
                 if os.path.exists(path):
-                    lang = LANGUAGE_MAP[language]
                     digest = self.file_cacher.put_file_from_path(
                         path,
                         "Statement for task %s (lang: %s)" % (name,
                                                               language))
-                    args["statements"].append(Statement(lang, digest))
+                    args["statements"][lang] = Statement(lang, digest)
                     args["primary_statements"].append(lang)
-            args["primary_statements"] = json.dumps(args["primary_statements"])
 
-        args["submission_format"] = [SubmissionFormatElement("%s.%%l" % name)]
+        args["submission_format"] = ["%s.%%l" % name]
 
         # These options cannot be configured in the Polygon format.
         # Uncomment the following to set specific values for them.
@@ -153,15 +157,14 @@ class PolygonTaskLoader(TaskLoader):
         # args['token_gen_interval'] = make_timedelta(1800)
         # args['token_gen_max'] = 2
 
-        task_cms_conf_path = os.path.join(self.path, 'files')
+        task_cms_conf_path = os.path.join(self.path, 'files', 'cms_conf.py')
         task_cms_conf = None
-        if os.path.exists(os.path.join(task_cms_conf_path, 'cms_conf.py')):
-            sys.path.append(task_cms_conf_path)
+        if os.path.exists(task_cms_conf_path):
             logger.info("Found additional CMS options for task %s.", name)
-            task_cms_conf = __import__('cms_conf')
-            # TODO: probably should find more clever way to get rid of caching
-            task_cms_conf = reload(task_cms_conf)
-            sys.path.pop()
+            with io.open(task_cms_conf_path, 'rb') as f:
+                task_cms_conf = imp.load_module('cms_conf', f,
+                                                task_cms_conf_path,
+                                                ('.py', 'r', imp.PY_SOURCE))
         if task_cms_conf is not None and hasattr(task_cms_conf, "general"):
             args.update(task_cms_conf.general)
 
@@ -174,15 +177,15 @@ class PolygonTaskLoader(TaskLoader):
 
             args = {}
             args["task"] = task
-            args["description"] = testset_name
+            args["description"] = str(testset_name)
             args["autojudge"] = False
 
             tl = float(testset.find('time-limit').text)
-            ml = float(testset.find('memory-limit').text)
+            ml = int(testset.find('memory-limit').text)
             args["time_limit"] = tl * 0.001
-            args["memory_limit"] = int(ml / (1024 * 1024))
+            args["memory_limit"] = ml // (1024 * 1024)
 
-            args["managers"] = []
+            args["managers"] = {}
             infile_param = judging.attrib['input-file']
             outfile_param = judging.attrib['output-file']
 
@@ -195,19 +198,22 @@ class PolygonTaskLoader(TaskLoader):
                 logger.info("Checker found, compiling")
                 checker_exe = os.path.join(
                     os.path.dirname(checker_src), "checker")
-                testlib_path = "/usr/local/include/cms/testlib.h"
+                testlib_path = "/usr/local/include/cms"
+                testlib_include = os.path.join(testlib_path, "testlib.h")
                 if not config.installed:
                     testlib_path = os.path.join(os.path.dirname(__file__),
-                                                "polygon", "testlib.h")
-                os.system("cat %s | \
-                    sed 's$testlib.h$%s$' | \
-                    g++ -x c++ -O2 -static -o %s -" %
-                          (checker_src, testlib_path, checker_exe))
+                                                "polygon")
+                code = subprocess.call(["g++", "-x", "c++", "-O2", "-static",
+                                        "-DCMS", "-I", testlib_path,
+                                        "-include", testlib_include,
+                                        "-o", checker_exe, checker_src])
+                if code != 0:
+                    logger.critical("Could not compile checker")
+                    return None
                 digest = self.file_cacher.put_file_from_path(
                     checker_exe,
                     "Manager for task %s" % name)
-                args["managers"] += [
-                    Manager("checker", digest)]
+                args["managers"]["checker"] = Manager("checker", digest)
                 evaluation_param = "comparator"
             else:
                 logger.info("Checker not found, using diff")
@@ -215,8 +221,7 @@ class PolygonTaskLoader(TaskLoader):
 
             args["task_type"] = "Batch"
             args["task_type_parameters"] = \
-                '["%s", ["%s", "%s"], "%s"]' % \
-                ("alone", infile_param, outfile_param, evaluation_param)
+                ["alone", [infile_param, outfile_param], evaluation_param]
 
             args["score_type"] = "Sum"
             total_value = 100.0
@@ -227,11 +232,11 @@ class PolygonTaskLoader(TaskLoader):
             n_input = testcases
             if n_input != 0:
                 input_value = total_value / n_input
-            args["score_type_parameters"] = str(input_value)
+            args["score_type_parameters"] = input_value
 
-            args["testcases"] = []
+            args["testcases"] = {}
 
-            for i in xrange(testcases):
+            for i in range(testcases):
                 infile = os.path.join(self.path, testset_name,
                                       "%02d" % (i + 1))
                 outfile = os.path.join(self.path, testset_name,
@@ -248,7 +253,7 @@ class PolygonTaskLoader(TaskLoader):
                 testcase = Testcase("%03d" % (i, ), False,
                                     input_digest, output_digest)
                 testcase.public = True
-                args["testcases"] += [testcase]
+                args["testcases"][testcase.codename] = testcase
 
             if task_cms_conf is not None and \
                hasattr(task_cms_conf, "datasets") and \
@@ -323,7 +328,7 @@ class PolygonUserLoader(UserLoader):
             logger.info("Loading parameters for user %s.", username)
             args = {}
             args['username'] = userdata[0]
-            args['password'] = userdata[1]
+            args['password'] = build_password(userdata[1])
             args['first_name'] = userdata[2]
             args['last_name'] = userdata[3]
             args['hidden'] = (len(userdata) > 4 and userdata[4] == '1')
@@ -448,7 +453,7 @@ class PolygonContestLoader(ContestLoader):
                     user = user.split(';')
                     participations.append({
                         "username": user[0].strip(),
-                        "password": user[1].strip(),
+                        "password": build_password(user[1].strip()),
                         "hidden": user[4].strip()
                         # "ip" is not passed
                     })

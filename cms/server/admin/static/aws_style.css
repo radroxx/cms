@@ -64,6 +64,12 @@ a, a:visited {
     color: #426DC9;
 }
 
+hr {
+    height: 0;
+    border: none;
+    border-top: 1px dashed grey;
+}
+
 .hr {
     text-align: center;
     color: #53637D;
@@ -335,7 +341,7 @@ table th {
 table td {
     font-size: 0.875em;
     padding: 0 0.5em;
-    vertical-align: middle;
+    vertical-align: top;
     width: 1px;
     white-space: nowrap;
 }
@@ -374,8 +380,28 @@ table.TaskTypeOptions {
     margin: 5px 0px;
 }
 
+table td.wrapping-options {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+}
 
+table td.wrapping-options label {
+    margin-right: 15px;
+}
 
+table td.partial::after {
+    content: "*";
+}
+
+table.sortable th {
+    white-space: nowrap;
+}
+
+th .column-sort {
+    text-decoration: none;
+    margin-left: 8px;
+}
 
 /* TODO */
 
@@ -439,6 +465,10 @@ table.TaskTypeOptions {
 
 #notifications .notification_subject {
     font-weight: bold;
+}
+
+.preserve_line_breaks {
+    white-space: pre-line;
 }
 
 
@@ -610,9 +640,18 @@ body.admin .notifications .answered {
     border: 0.143em solid #555555;
 }
 
+body.admin .notifications .claim_reply {
+    float: right;
+    padding-right: 0.5em;
+}
+
 body.admin .notifications .ignore_reply {
     float: right;
     padding-right: 0.5em;
+}
+
+body.admin .notifications .notification_admin_owner {
+    font-style: italic;
 }
 
 body.admin .notifications .notification_close {

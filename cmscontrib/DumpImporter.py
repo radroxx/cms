@@ -1,11 +1,11 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2015 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2016 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2013 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2013-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
 # Copyright © 2014 Luca Versari <veluca93@gmail.com>
 # Copyright © 2014 William Di Luigi <williamdiluigi@gmail.com>
@@ -30,45 +30,50 @@ again should be idempotent.
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iteritems
 
 # We enable monkey patching to make many libraries gevent-friendly
 # (for instance, urllib3, used by requests)
 import gevent.monkey
-gevent.monkey.patch_all()
+gevent.monkey.patch_all()  # noqa
 
 import argparse
 import io
+import ipaddress
 import json
 import logging
 import os
 import sys
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.types import \
     Boolean, Integer, Float, String, Unicode, DateTime, Interval, Enum
+from sqlalchemy.dialects.postgresql import ARRAY, CIDR, JSONB
 
 import cms.db as class_hook
 
 from cms import utf8_decoder
-from cms.db import version as model_version
-from cms.db import Contest, RepeatedUnicode, SessionGen, \
-    Submission, SubmissionResult, UserTest, UserTestResult, \
-    init_db, drop_db
+from cms.db import version as model_version, Codename, Filename, \
+    FilenameSchema, FilenameSchemaArray, Digest
+from cms.db import SessionGen, Contest, Submission, SubmissionResult, \
+    UserTest, UserTestResult, PrintJob, init_db, drop_db, enumerate_files
 from cms.db.filecacher import FileCacher
 
-from cmscontrib import sha1sum
-from cmscommon.datetime import make_datetime
 from cmscommon.archive import Archive
+from cmscommon.datetime import make_datetime
+from cmscommon.digest import path_digest
 
 
 logger = logging.getLogger(__name__)
 
 
 def find_root_of_archive(file_names):
-
     """Given a list of file names (the content of an archive) find the
     name of the root directory, i.e., the only file that would be
     created in a directory if we extract there the archive.
@@ -91,6 +96,41 @@ def find_root_of_archive(file_names):
     return current_root
 
 
+def decode_value(type_, value):
+    """Decode a given value in a JSON-compatible form to a given type.
+
+    type_ (sqlalchemy.types.TypeEngine): the SQLAlchemy type of the
+        column that will hold the value.
+    value (object): the value, encoded as bool, int, float, string,
+        list, dict or any other JSON-compatible format.
+
+    return (object): the value, decoded.
+
+    """
+    if value is None:
+        return None
+    elif isinstance(type_, (
+            Boolean, Integer, Float, String, Unicode, Enum, JSONB, Codename,
+            Filename, FilenameSchema, Digest)):
+        return value
+    elif isinstance(type_, DateTime):
+        try:
+            return make_datetime(value)
+        except OverflowError:
+            logger.warning("The dump has a date too far in the future for "
+                           "your system. Changing to 2030-01-01.")
+            return datetime(2030, 1, 1)
+    elif isinstance(type_, Interval):
+        return timedelta(seconds=value)
+    elif isinstance(type_, (ARRAY, FilenameSchemaArray)):
+        return list(decode_value(type_.item_type, item) for item in value)
+    elif isinstance(type_, CIDR):
+        return ipaddress.ip_network(value)
+    else:
+        raise RuntimeError(
+            "Unknown SQLAlchemy column type: %s" % type_)
+
+
 class DumpImporter(object):
 
     """This service imports data from a directory that has been
@@ -101,13 +141,14 @@ class DumpImporter(object):
 
     def __init__(self, drop, import_source,
                  load_files, load_model, skip_generated,
-                 skip_submissions, skip_user_tests):
+                 skip_submissions, skip_user_tests, skip_print_jobs):
         self.drop = drop
         self.load_files = load_files
         self.load_model = load_model
         self.skip_generated = skip_generated
         self.skip_submissions = skip_submissions
         self.skip_user_tests = skip_user_tests
+        self.skip_print_jobs = skip_print_jobs
 
         self.import_source = import_source
         self.import_dir = import_source
@@ -156,7 +197,7 @@ class DumpImporter(object):
                     # input is correct without actually doing any
                     # validations.  Thus, for example, we're not
                     # checking that the decoded object is a dict...
-                    self.datas = json.load(fin, encoding="utf-8")
+                    self.datas = json.load(fin)
 
                 # If the dump has been exported using a data model
                 # different than the current one (that is, a previous
@@ -202,14 +243,14 @@ class DumpImporter(object):
                 assert self.datas["_version"] == model_version
 
                 self.objs = dict()
-                for id_, data in self.datas.iteritems():
+                for id_, data in iteritems(self.datas):
                     if not id_.startswith("_"):
                         self.objs[id_] = self.import_object(data)
-                for id_, data in self.datas.iteritems():
+                for id_, data in iteritems(self.datas):
                     if not id_.startswith("_"):
                         self.add_relationships(data, self.objs[id_])
 
-                for k, v in list(self.objs.iteritems()):
+                for k, v in list(iteritems(self.objs)):
 
                     # Skip submissions if requested
                     if self.skip_submissions and isinstance(v, Submission):
@@ -217,6 +258,10 @@ class DumpImporter(object):
 
                     # Skip user_tests if requested
                     if self.skip_user_tests and isinstance(v, UserTest):
+                        del self.objs[k]
+
+                    # Skip print jobs if requested
+                    if self.skip_print_jobs and isinstance(v, PrintJob):
                         del self.objs[k]
 
                     # Skip generated data if requested
@@ -240,9 +285,12 @@ class DumpImporter(object):
 
                     if isinstance(obj, Contest):
                         contest_id += [obj.id]
-                        contest_files |= obj.enumerate_files(
-                            self.skip_submissions, self.skip_user_tests,
-                            self.skip_generated)
+                        contest_files |= enumerate_files(
+                            session, obj,
+                            skip_submissions=self.skip_submissions,
+                            skip_user_tests=self.skip_user_tests,
+                            skip_print_jobs=self.skip_print_jobs,
+                            skip_generated=self.skip_generated)
 
                 session.commit()
             else:
@@ -337,24 +385,9 @@ class DumpImporter(object):
                 continue
 
             col = prp.columns[0]
-            col_type = type(col.type)
 
             val = data[prp.key]
-            if col_type in \
-                    [Boolean, Integer, Float, Unicode, RepeatedUnicode, Enum]:
-                args[prp.key] = val
-            elif col_type is String:
-                args[prp.key] = \
-                    val.encode('latin1') if val is not None else None
-            elif col_type is DateTime:
-                args[prp.key] = \
-                    make_datetime(val) if val is not None else None
-            elif col_type is Interval:
-                args[prp.key] = \
-                    timedelta(seconds=val) if val is not None else None
-            else:
-                raise RuntimeError(
-                    "Unknown SQLAlchemy column type: %s" % col_type)
+            args[prp.key] = decode_value(col.type, val)
 
         return cls(**args)
 
@@ -384,13 +417,13 @@ class DumpImporter(object):
             val = data[prp.key]
             if val is None:
                 setattr(obj, prp.key, None)
-            elif type(val) == unicode:
+            elif isinstance(val, str):
                 setattr(obj, prp.key, self.objs[val])
-            elif type(val) == list:
+            elif isinstance(val, list):
                 setattr(obj, prp.key, list(self.objs[i] for i in val))
-            elif type(val) == dict:
+            elif isinstance(val, dict):
                 setattr(obj, prp.key,
-                        dict((k, self.objs[v]) for k, v in val.iteritems()))
+                        dict((k, self.objs[v]) for k, v in iteritems(val)))
             else:
                 raise RuntimeError(
                     "Unknown RelationshipProperty value: %s" % type(val))
@@ -425,7 +458,7 @@ class DumpImporter(object):
             return False
 
         # Then check the digest.
-        calc_digest = sha1sum(path)
+        calc_digest = path_digest(path)
         if digest != calc_digest:
             logger.critical("File %s has hash %s, but the server returned %s, "
                             "aborting.", path, calc_digest, digest)
@@ -452,6 +485,8 @@ def main():
                         help="don't import submissions")
     parser.add_argument("-U", "--no-user-tests", action="store_true",
                         help="don't import user tests")
+    parser.add_argument("-P", "--no-print-jobs", action="store_true",
+                        help="don't import print jobs")
     parser.add_argument("import_source", action="store", type=utf8_decoder,
                         help="source directory or compressed file")
 
@@ -463,7 +498,8 @@ def main():
                             load_model=not args.files,
                             skip_generated=args.no_generated,
                             skip_submissions=args.no_submissions,
-                            skip_user_tests=args.no_user_tests)
+                            skip_user_tests=args.no_user_tests,
+                            skip_print_jobs=args.no_print_jobs)
     success = importer.do_import()
     return 0 if success is True else 1
 

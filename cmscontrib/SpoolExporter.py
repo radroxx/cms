@@ -1,9 +1,9 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2012 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -27,13 +27,17 @@ Italian IOI repository for storing the results of a contest.
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iterkeys, iteritems
 
 # We enable monkey patching to make many libraries gevent-friendly
 # (for instance, urllib3, used by requests)
 import gevent.monkey
-gevent.monkey.patch_all()
+gevent.monkey.patch_all()  # noqa
 
 import argparse
 import io
@@ -42,10 +46,14 @@ import os
 import sys
 import time
 
+from sqlalchemy import not_
+
 from cms import utf8_decoder
-from cms.db import SessionGen, Contest, ask_for_contest
+from cms.db import SessionGen, Contest, ask_for_contest, Submission, \
+    Participation, get_submissions
 from cms.db.filecacher import FileCacher
-from cms.grading import languagemanager, task_score
+from cms.grading import languagemanager
+from cms.grading.scoring import task_score
 
 
 logger = logging.getLogger(__name__)
@@ -88,11 +96,10 @@ class SpoolExporter(object):
 
         with SessionGen() as session:
             self.contest = Contest.get_from_id(self.contest_id, session)
-            self.submissions = sorted(
-                (submission
-                 for submission in self.contest.get_submissions()
-                 if not submission.participation.hidden),
-                key=lambda submission: submission.timestamp)
+            self.submissions = \
+                get_submissions(session, contest_id=self.contest_id) \
+                .filter(not_(Participation.hidden)) \
+                .order_by(Submission.timestamp).all()
 
             # Creating users' directory.
             for participation in self.contest.participations:
@@ -132,7 +139,7 @@ class SpoolExporter(object):
             submission_dir = os.path.join(
                 self.upload_dir, username, "%s.%d.%s" % (task, timestamp, ext))
             os.mkdir(submission_dir)
-            for filename, file_ in submission.files.iteritems():
+            for filename, file_ in iteritems(submission.files):
                 self.file_cacher.get_file_to_path(
                     file_.digest,
                     os.path.join(submission_dir, filename.replace(".%l", ext)))
@@ -204,7 +211,7 @@ class SpoolExporter(object):
         if is_partial:
             logger.warning("Some of the scores are not definitive.")
 
-        sorted_usernames = sorted(scores.keys(),
+        sorted_usernames = sorted(iterkeys(scores),
                                   key=lambda username: (scores[username],
                                                         username),
                                   reverse=True)

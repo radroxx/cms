@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -9,7 +9,7 @@
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
 # Copyright © 2014 Fabian Gundlach <320pointsguy@gmail.com>
-# Copyright © 2015 William Di Luigi <williamdiluigi@gmail.com>
+# Copyright © 2015-2016 William Di Luigi <williamdiluigi@gmail.com>
 # Copyright © 2016 Myungwoo Chun <mc.tamaki@gmail.com>
 # Copyright © 2016 Amir Keivan Mohtashami <akmohtashami97@gmail.com>
 #
@@ -31,270 +31,91 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iterkeys
 
 import logging
-import socket
-import struct
+import os
 import traceback
 
 import tornado.web
-
-from sqlalchemy.orm import contains_eager
 from werkzeug.datastructures import LanguageAccept
 from werkzeug.http import parse_accept_header
 
-from cms import config
-from cms.db import Contest, Participation, User
-from cms.redis import get_session, set_session
-from cms.server import CommonRequestHandler, compute_actual_phase, \
-    file_handler_gen, get_url_root
-from cms.locale import filter_language_codes
-from cmscommon.datetime import get_timezone
-from cmscommon.isocodes import translate_language_code, \
-    translate_language_country_code
+from cms.db import Contest
+from cms.locale import DEFAULT_TRANSLATION, choose_language_code
+from cms.server import CommonRequestHandler
+from cmscommon.datetime import utc as utc_tzinfo
 
 
 logger = logging.getLogger(__name__)
 
 
-NOTIFICATION_ERROR = "error"
-NOTIFICATION_WARNING = "warning"
-NOTIFICATION_SUCCESS = "success"
-
-
-def check_ip(ip, whitelist):
-    """Return if client IP belongs to one of the accepted subnets.
-
-    ip (string): IP address to verify.
-    whitelist (string): IP addresses or subnets to check against (separated
-        by a comma).
-
-    return (bool): whether client is equal to one of the IPs in the whitelist
-        or client belongs to one of the subnets in the whitelist.
-
-    """
-    for wanted in whitelist.split(","):
-        wanted, sep, subnet = wanted.partition('/')
-
-        subnet = 32 if sep == "" else int(subnet)
-        snmask = 2 ** 32 - 2 ** (32 - subnet)
-        wanted = struct.unpack(">I", socket.inet_aton(wanted))[0]
-        client = struct.unpack(">I", socket.inet_aton(ip))[0]
-
-        if (wanted & snmask) == (client & snmask):
-            return True
-
-    return False
-
-
 class BaseHandler(CommonRequestHandler):
     """Base RequestHandler for this application.
 
-    All the RequestHandler classes in this application should be a
-    child of this class.
+    This will also handle the contest list on the homepage.
 
     """
 
     def __init__(self, *args, **kwargs):
         super(BaseHandler, self).__init__(*args, **kwargs)
-        self.cookie_lang = None
-        self.browser_lang = None
-        self.langs = None
-        self._ = None
+        # The list of interface translations the user can choose from.
+        self.available_translations = self.service.translations
+        # The translation that best matches the user's system settings
+        # (as reflected by the browser in the HTTP request's
+        # Accept-Language header).
+        self.automatic_translation = DEFAULT_TRANSLATION
+        # The translation that the user specifically manually picked.
+        self.cookie_translation = None
+        # The translation that we are going to use.
+        self.translation = DEFAULT_TRANSLATION
+        self._ = self.translation.gettext
+        self.n_ = self.translation.ngettext
+
+    def render(self, template_name, **params):
+        t = self.service.jinja2_environment.get_template(template_name)
+        for chunk in t.generate(**params):
+            self.write(chunk)
 
     def prepare(self):
         """This method is executed at the beginning of each request.
 
         """
         super(BaseHandler, self).prepare()
-        self.contest = Contest.get_from_id(self.application.service.contest,
-                                           self.sql_session)
+        self.setup_locale()
 
-        self._ = self.locale.translate
+    def setup_locale(self):
+        lang_codes = list(iterkeys(self.available_translations))
 
-        self.r_params = self.render_params()
-
-    def get_current_user(self):
-        """Return the currently logged in participation.
-
-        The name is get_current_user because tornado requires that
-        name.
-
-        The participation is obtained from one of the possible sources:
-        - if IP autologin is enabled, the remote IP address is matched
-          with the participation IP address; if a match is found, that
-          participation is returned; in case of errors, None is returned;
-        - if username/password authentication is enabled, and the cookie
-          is valid, the corresponding participation is returned, and the
-          cookie is refreshed.
-
-        After finding the participation, IP login and hidden users
-        restrictions are checked.
-
-        In case of any error, or of a login by other sources, the
-        cookie is deleted.
-
-        return (Participation|None): the participation object for the
-            user logged in for the running contest.
-
-        """
-        participation = None
-
-        if self.contest.ip_autologin:
-            try:
-                participation = self._get_current_user_from_ip()
-                # If the login is IP-based, we delete previous cookies.
-                if participation is not None:
-                    self.clear_cookie(config.session_cookie)
-            except RuntimeError:
-                return None
-
-        if participation is None \
-                and self.contest.allow_password_authentication:
-            participation = self._get_current_user_from_cookie()
-
-        if participation is None:
-            self.clear_cookie(config.session_cookie)
-            return None
-
-        # Check if user is using the right IP (or is on the right subnet),
-        # and that is not hidden if hidden users are blocked.
-        ip_login_restricted = \
-            self.contest.ip_restriction and participation.ip is not None \
-            and not check_ip(self.request.remote_ip, participation.ip)
-        hidden_user_restricted = \
-            participation.hidden and self.contest.block_hidden_participations
-        if ip_login_restricted or hidden_user_restricted:
-            self.clear_cookie(config.session_cookie)
-            participation = None
-
-        return participation
-
-    def _get_current_user_from_ip(self):
-        """Return the current participation based on the IP address.
-
-        return (Participation|None): the only participation matching
-            the remote IP address, or None if no participations could
-            be matched.
-
-        raise (RuntimeError): if there is more than one participation
-            matching the remote IP address.
-
-        """
-        remote_ip = self.request.remote_ip
-        participations = self.sql_session.query(Participation)\
-            .filter(Participation.contest == self.contest)\
-            .filter(Participation.ip == remote_ip)
-
-        # If hidden users are blocked we ignore them completely.
-        if self.contest.block_hidden_participations:
-            participations = participations\
-                .filter(Participation.hidden.is_(False))
-
-        participations = participations.all()
-
-        if len(participations) == 1:
-            return participations[0]
-
-        # Having more than participation with the same IP,
-        # is a mistake and should not happen. In such case,
-        # we disallow login for that IP completely, in order to
-        # make sure the problem is noticed.
-        if len(participations) > 1:
-            logger.error("%d participants have IP %s while"
-                         "auto-login feature is enabled." % (
-                             len(participations), remote_ip))
-            raise RuntimeError("More than one participants with the same IP.")
-
-    def _get_current_user_from_cookie(self):
-        """Return the current participation based on the cookie.
-
-        If a participation can be extracted, the cookie is refreshed.
-
-        return (Participation|None): the participation extracted from
-            the cookie, or None if not possible.
-
-        """
-        session_id = self.get_cookie(config.session_cookie)
-        if session_id is None:
-            return None
-
-        # Get login info from redis.
-        login_info = get_session(session_id)
-        if login_info is None:
-            return None
-        user_id = login_info["user_id"]
-        contest_id = login_info["contest_id"]
-
-        # Load participation from DB and make sure it exists.
-        participation = self.sql_session.query(Participation)\
-            .join(Participation.user)\
-            .options(contains_eager(Participation.user))\
-            .filter(Participation.contest == self.contest)\
-            .filter(User.id == user_id)\
-            .first()
-        if participation is None:
-            return None
-
-        # Check that the password is correct (if a contest-specific
-        # password is defined, use that instead of the user password).
-        if participation.password is None:
-            correct_contest_id = None
-        else:
-            correct_contest_id = self.contest.id
-        if contest_id != correct_contest_id:
-            return None
-
-        if self.refresh_login:
-            set_session(login_info, session_id=session_id)
-
-        return participation
-
-    def get_user_locale(self):
-        self.langs = self.application.service.langs
-        lang_codes = self.langs.keys()
-
-        if len(self.contest.allowed_localizations) > 0:
-            lang_codes = filter_language_codes(
-                lang_codes, self.contest.allowed_localizations)
-
-        # Select the one the user likes most.
-        basic_lang = lang_codes[0].replace("_", "-") \
-            if len(self.contest.allowed_localizations) else 'en'
-        http_langs = [lang_code.replace("_", "-") for lang_code in lang_codes]
-        self.browser_lang = parse_accept_header(
+        browser_langs = parse_accept_header(
             self.request.headers.get("Accept-Language", ""),
-            LanguageAccept).best_match(http_langs, basic_lang)
+            LanguageAccept).values()
+        automatic_lang = choose_language_code(browser_langs, lang_codes)
+        if automatic_lang is None:
+            automatic_lang = lang_codes[0]
+        self.automatic_translation = \
+            self.available_translations[automatic_lang]
 
-        self.cookie_lang = self.get_cookie("language", None)
-
-        if self.cookie_lang in http_langs:
-            lang_code = self.cookie_lang
+        cookie_lang = self.get_cookie("language", None)
+        if cookie_lang is not None:
+            chosen_lang = \
+                choose_language_code([cookie_lang, automatic_lang], lang_codes)
+            if chosen_lang == cookie_lang:
+                self.cookie_translation = \
+                    self.available_translations[cookie_lang]
         else:
-            lang_code = self.browser_lang
+            chosen_lang = automatic_lang
+        self.translation = self.available_translations[chosen_lang]
 
-        self.set_header("Content-Language", lang_code)
-        return self.langs[lang_code.replace("-", "_")]
+        self._ = self.translation.gettext
+        self.n_ = self.translation.ngettext
 
-    @staticmethod
-    def _get_token_status(obj):
-        """Return the status of the tokens for the given object.
-
-        obj (Contest or Task): an object that has the token_* attributes.
-        return (int): one of 0 (disabled), 1 (enabled/finite) and 2
-                      (enabled/infinite).
-
-        """
-        if obj.token_mode == "disabled":
-            return 0
-        elif obj.token_mode == "finite":
-            return 1
-        elif obj.token_mode == "infinite":
-            return 2
-        else:
-            raise RuntimeError("Unknown token_mode value.")
+        self.set_header("Content-Language", chosen_lang)
 
     def render_params(self):
         """Return the default render params used by almost all handlers.
@@ -303,94 +124,26 @@ class BaseHandler(CommonRequestHandler):
 
         """
         ret = {}
-        ret["timestamp"] = self.timestamp
-        ret["contest"] = self.contest
-        ret["url_root"] = get_url_root(self.request.path)
+        ret["now"] = self.timestamp
+        ret["utc"] = utc_tzinfo
+        ret["url"] = self.url
 
-        ret["phase"] = self.contest.phase(self.timestamp)
+        ret["available_translations"] = self.available_translations
 
-        ret["printing_enabled"] = (config.printer is not None)
-        ret["questions_enabled"] = self.contest.allow_questions
-        ret["testing_enabled"] = self.contest.allow_user_tests
+        ret["cookie_translation"] = self.cookie_translation
+        ret["automatic_translation"] = self.automatic_translation
 
-        if self.current_user is not None:
-            participation = self.current_user
+        ret["translation"] = self.translation
+        ret["gettext"] = self._
+        ret["ngettext"] = self.n_
 
-            res = compute_actual_phase(
-                self.timestamp, self.contest.start, self.contest.stop,
-                self.contest.per_user_time, participation.starting_time,
-                participation.delay_time, participation.extra_time)
+        # FIXME The handler provides too broad an access: its usage
+        # should be extracted into with narrower-scoped parameters.
+        ret["handler"] = self
 
-            ret["actual_phase"], ret["current_phase_begin"], \
-                ret["current_phase_end"], ret["valid_phase_begin"], \
-                ret["valid_phase_end"] = res
-
-            if ret["actual_phase"] == 0:
-                ret["phase"] = 0
-
-            # set the timezone used to format timestamps
-            ret["timezone"] = get_timezone(participation.user, self.contest)
-
-        # some information about token configuration
-        ret["tokens_contest"] = self._get_token_status(self.contest)
-
-        t_tokens = sum(self._get_token_status(t) for t in self.contest.tasks)
-        if t_tokens == 0:
-            ret["tokens_tasks"] = 0  # all disabled
-        elif t_tokens == 2 * len(self.contest.tasks):
-            ret["tokens_tasks"] = 2  # all infinite
-        else:
-            ret["tokens_tasks"] = 1  # all finite or mixed
-
-        # TODO Now all language names are shown in the active language.
-        # It would be better to show them in the corresponding one.
-        ret["lang_names"] = {}
-
-        # Get language codes for allowed localizations
-        lang_codes = self.langs.keys()
-        if len(self.contest.allowed_localizations) > 0:
-            lang_codes = filter_language_codes(
-                lang_codes, self.contest.allowed_localizations)
-        for lang_code, trans in self.langs.iteritems():
-            language_name = None
-            # Filter lang_codes with allowed localizations
-            if lang_code not in lang_codes:
-                continue
-            try:
-                language_name = translate_language_country_code(
-                    lang_code, trans)
-            except ValueError:
-                language_name = translate_language_code(
-                    lang_code, trans)
-            ret["lang_names"][lang_code.replace("_", "-")] = language_name
-
-        ret["cookie_lang"] = self.cookie_lang
-        ret["browser_lang"] = self.browser_lang
+        ret["xsrf_form_html"] = self.xsrf_form_html()
 
         return ret
-
-    def finish(self, *args, **kwds):
-        """Finish this response, ending the HTTP request.
-
-        We override this method in order to properly close the database.
-
-        TODO - Now that we have greenlet support, this method could be
-        refactored in terms of context manager or something like
-        that. So far I'm leaving it to minimize changes.
-
-        """
-        if hasattr(self, "sql_session"):
-            try:
-                self.sql_session.close()
-            except Exception as error:
-                logger.warning("Couldn't close SQL connection: %r", error)
-        try:
-            tornado.web.RequestHandler.finish(self, *args, **kwds)
-        except IOError:
-            # When the client closes the connection before we reply,
-            # Tornado raises an IOError exception, that would pollute
-            # our log with unnecessarily critical messages
-            logger.debug("Connection closed before our reply.")
 
     def write_error(self, status_code, **kwargs):
         if "exc_info" in kwargs and \
@@ -404,35 +157,24 @@ class BaseHandler(CommonRequestHandler):
         # the data we need to display a basic template with the error
         # information. If r_params is not defined (i.e. something went
         # *really* bad) we simply return a basic textual error notice.
-        if getattr(self, 'r_params', None) is not None:
+        if self.r_params is not None:
             self.render("error.html", status_code=status_code, **self.r_params)
         else:
             self.write("A critical error has occurred :-(")
             self.finish()
 
-
-class StaticFileGzHandler(tornado.web.StaticFileHandler):
-    """Handle files which may be gzip-compressed on the filesystem."""
-    def validate_absolute_path(self, root, absolute_path):
-        self.is_gzipped = False
-        try:
-            return tornado.web.StaticFileHandler.validate_absolute_path(
-                self, root, absolute_path)
-        except tornado.web.HTTPError as e:
-            if e.status_code != 404:
-                raise
-            self.is_gzipped = True
-            self.absolute_path = \
-                tornado.web.StaticFileHandler.validate_absolute_path(
-                    self, root, absolute_path + ".gz")
-            self.set_header("Content-encoding", "gzip")
-            return self.absolute_path
-
-    def get_content_type(self):
-        if self.is_gzipped:
-            return "text/plain"
-        else:
-            return tornado.web.StaticFileHandler.get_content_type(self)
+    def is_multi_contest(self):
+        """Return whether CWS serves all contests."""
+        return self.service.contest_id is None
 
 
-FileHandler = file_handler_gen(BaseHandler)
+class ContestListHandler(BaseHandler):
+    def get(self):
+        self.r_params = self.render_params()
+        # We need this to be computed for each request because we want to be
+        # able to import new contests without having to restart CWS.
+        contest_list = dict()
+        for contest in self.sql_session.query(Contest).all():
+            contest_list[contest.name] = contest
+        self.render("contest_list.html", contest_list=contest_list,
+                    **self.r_params)

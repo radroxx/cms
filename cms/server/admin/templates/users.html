@@ -1,4 +1,4 @@
-{% extends base.html %}
+{% extends "base.html" %}
 
 {% block core %}
 
@@ -6,15 +6,15 @@
   <h1>Users list</h1>
 </div>
 
-<form action="{{ url_root }}/users" method="POST">
-  {% module xsrf_form_html() %}
+<form action="{{ url("users") }}" method="POST">
+  {{ xsrf_form_html|safe }}
   Edit selected user:
    <input type="submit"
          name="operation"
          value="Remove"
-{% if not current_user.permission_all %}
+{% if not admin.permission_all %}
          disabled
-{% end %}
+{% endif %}
          />
   <table class="bordered">
     <thead>
@@ -26,18 +26,18 @@
       </tr>
     </thead>
     <tbody>
-      {% for u in sorted(user_list, cmp = lambda x, y: cmp(x.username, y.username)) %}
+      {% for u in user_list|sort(attribute="username") %}
       <tr>
         <td>
           <input type="radio" name="user_id" value="{{ u.id }}"/>
         </td>
-        <td><a href="{{ url_root }}/user/{{ u.id }}">{{ u.username }}</a></td>
+        <td><a href="{{ url("user", u.id) }}">{{ u.username }}</a></td>
         <td>{{ u.first_name }}</td>
         <td>{{ u.last_name }}</td>
       </tr>
-      {% end %}
+      {% endfor %}
     </tbody>
   </table>
 </form>
 
-{% end %}
+{% endblock core %}

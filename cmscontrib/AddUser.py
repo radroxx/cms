@@ -1,8 +1,9 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2016 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2017-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -22,13 +23,18 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 # We enable monkey patching to make many libraries gevent-friendly
 # (for instance, urllib3, used by requests)
 import gevent.monkey
-gevent.monkey.patch_all()
+
+
+gevent.monkey.patch_all()  # noqa
 
 import argparse
 import logging
@@ -36,7 +42,8 @@ import sys
 
 from cms import utf8_decoder
 from cms.db import SessionGen, User
-from cmscommon.crypto import generate_random_password
+from cmscommon.crypto import generate_random_password, build_password, \
+    hash_password
 
 from sqlalchemy.exc import IntegrityError
 
@@ -44,21 +51,29 @@ from sqlalchemy.exc import IntegrityError
 logger = logging.getLogger(__name__)
 
 
-def add_user(first_name, last_name, username, password, email, timezone,
-             preferred_languages):
+def add_user(first_name, last_name, username, password, method, is_hashed,
+             email, timezone, preferred_languages):
     logger.info("Creating the user in the database.")
+    pwd_generated = False
     if password is None:
+        assert not is_hashed
         password = generate_random_password()
-    if preferred_languages is None or preferred_languages == "":
-        preferred_languages = "[]"
+        pwd_generated = True
+    if is_hashed:
+        stored_password = build_password(password, method)
     else:
-        preferred_languages = \
-            "[" + ",".join("\"" + lang + "\""
-                           for lang in preferred_languages.split(",")) + "]"
+        stored_password = hash_password(password, method)
+
+    if preferred_languages is None:
+        preferred_languages = []
+    else:
+        preferred_languages = list(
+            lang.strip() for lang in preferred_languages.split(",") if
+            lang.strip())
     user = User(first_name=first_name,
                 last_name=last_name,
                 username=username,
-                password=password,
+                password=stored_password,
                 email=email,
                 timezone=timezone,
                 preferred_languages=preferred_languages)
@@ -70,8 +85,9 @@ def add_user(first_name, last_name, username, password, email, timezone,
         logger.error("A user with the given username already exists.")
         return False
 
-    logger.info("User added. "
-                "Use AddParticipation to add this user to a contest.")
+    logger.info("User added%s. "
+                "Use AddParticipation to add this user to a contest."
+                % (" with password %s" % password if pwd_generated else ""))
     return True
 
 
@@ -86,19 +102,35 @@ def main():
                         help="family name of the user")
     parser.add_argument("username", action="store", type=utf8_decoder,
                         help="username used to log in")
-    parser.add_argument("-p", "--password", action="store", type=utf8_decoder,
-                        help="password, leave empty to auto-generate")
     parser.add_argument("-e", "--email", action="store", type=utf8_decoder,
                         help="email of the user")
     parser.add_argument("-t", "--timezone", action="store", type=utf8_decoder,
                         help="timezone of the user, e.g. Europe/London")
     parser.add_argument("-l", "--languages", action="store", type=utf8_decoder,
                         help="comma-separated list of preferred languages")
+    password_group = parser.add_mutually_exclusive_group()
+    password_group.add_argument(
+        "-p", "--plaintext-password", action="store", type=utf8_decoder,
+        help="password of the user in plain text")
+    password_group.add_argument(
+        "-H", "--hashed-password", action="store", type=utf8_decoder,
+        help="password of the user, already hashed using the given algorithm "
+             "(currently only --bcrypt)")
+    method_group = parser.add_mutually_exclusive_group()
+    method_group.add_argument(
+        "--bcrypt", dest="method", action="store_const", const="bcrypt",
+        help="whether the password will be stored in bcrypt-hashed format "
+             "(if omitted it will be stored in plain text)")
 
     args = parser.parse_args()
 
-    success = add_user(args.first_name, args.last_name,
-                       args.username, args.password, args.email,
+    if args.hashed_password is not None and args.method is None:
+        parser.error("hashed password given but no method specified")
+
+    success = add_user(args.first_name, args.last_name, args.username,
+                       args.plaintext_password or args.hashed_password,
+                       args.method or "plaintext",
+                       args.hashed_password is not None, args.email,
                        args.timezone, args.languages)
     return 0 if success is True else 1
 

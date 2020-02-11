@@ -1,52 +1,51 @@
-{% import time %}
-{% import json %}
-{% from cms import config %}
-{% from cms.db import SubmissionResult, UserTestResult %}
-{% from cms.grading.languagemanager import LANGUAGES, get_language %}
-{% from cmscommon.datetime import make_timestamp %}
-{% from cmscommon.crypto import get_hex_random_key %}
+{% from "fragments/reevaluation_buttons.html" import ReevaluationButtons with context %}
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <link rel="shortcut icon" href="{{ url_root }}/static/favicon.ico" />
-    <link rel="stylesheet" type="text/css" href="{{ url_root }}/static/reset.css">
-    <link rel="stylesheet" type="text/css" href="{{ url_root }}/static/aws_style.css">
-    <script type="text/javascript" src="{{ url_root }}/static/web_rpc.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/aws_utils.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/jq/jquery-1.7.1.min.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/jq/jquery.jqplot.min.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/jq/jqplot.dateAxisRenderer.min.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/jq/jqplot.enhancedLegendRenderer.min.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/sh/shCore.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/sh/shBrushCpp.js"></script>
-    <script type="text/javascript" src="{{ url_root }}/static/sh/shBrushDelphi.js"></script>
-    <link rel="stylesheet" type="text/css" href="{{ url_root }}/static/jq/jquery.jqplot.min.css"/>
-    <link rel="stylesheet" type="text/css" href="{{ url_root }}/static/sh/shCore.css"/>
-    <link rel="stylesheet" type="text/css" href="{{ url_root }}/static/sh/shThemeDefault.css"/>
+    <link rel="shortcut icon" href="{{ url("static", "favicon.ico") }}" />
+    <link rel="stylesheet" type="text/css" href="{{ url("static", "reset.css") }}">
+    <link rel="stylesheet" type="text/css" href="{{ url("static", "aws_style.css") }}">
+    <script src="{{ url("static", "web_rpc.js") }}"></script>
+    <script src="{{ url("static", "aws_utils.js") }}"></script>
+    <script src="{{ url("static", "jq", "jquery-1.7.1.min.js") }}"></script>
+    <script src="{{ url("static", "jq", "jquery.jqplot.min.js") }}"></script>
+    <script src="{{ url("static", "jq", "jqplot.dateAxisRenderer.min.js") }}"></script>
+    <script src="{{ url("static", "jq", "jqplot.enhancedLegendRenderer.min.js") }}"></script>
+    <script src="{{ url("static", "sh", "shCore.js") }}"></script>
+    <script src="{{ url("static", "sh", "shBrushCpp.js") }}"></script>
+    <script src="{{ url("static", "sh", "shBrushDelphi.js") }}"></script>
+    <link rel="stylesheet" type="text/css" href="{{ url("static", "jq", "jquery.jqplot.min.css") }}"/>
+    <link rel="stylesheet" type="text/css" href="{{ url("static", "sh", "shCore.css") }}"/>
+    <link rel="stylesheet" type="text/css" href="{{ url("static", "sh", "shThemeDefault.css") }}"/>
 
-    {% if contest is None %}
+    {% if contest is none %}
     <title>Admin</title>
     {% else %}
     <title>Admin: {{ contest.description }}</title>
-    {% end %}
+    {% endif %}
 
-    <script type="text/javascript">
+    <script>
 <!--
 function init()
 {
-    {% if contest is None %}
-    utils = new CMS.AWSUtils("{{ url_root }}", {{ make_timestamp(timestamp) }}, 0, 0, -1);
+    {% if contest is none %}
+    utils = new CMS.AWSUtils("{{ url() }}", {{ timestamp|make_timestamp }}, 0, 0, 0, 0, -1);
     utils.update_notifications();
     setInterval(function() { utils.update_notifications(); }, 15000);
     {% else %}
-    utils = new CMS.AWSUtils("{{ url_root }}", {{ make_timestamp(timestamp) }}, {{ make_timestamp(contest.start) }}, {{ make_timestamp(contest.stop) }}, {{ phase }});
+    utils = new CMS.AWSUtils("{{ url() }}", {{ timestamp|make_timestamp }},
+        {{ contest.start|make_timestamp }}, {{ contest.stop|make_timestamp }},
+        {{ contest.analysis_start|make_timestamp }}, {{ contest.analysis_stop|make_timestamp }},
+        {{ phase }});
 
+    {% if phase < 3 %}
     utils.update_remaining_time();
     setInterval(function() { utils.update_remaining_time(); }, 1000);
+    {% endif %}
     utils.update_notifications();
     setInterval(function() { utils.update_notifications(); }, 15000);
-    {% end %}
+    {% endif %}
 
     $(document).click(utils.hide_subpage);
 
@@ -55,10 +54,10 @@ function init()
     $(document).delegate('.toggling_on', 'click', utils.toggle_visibility);
     $(document).delegate('.toggling_off', 'click', utils.toggle_visibility);
 
-    {% block js_init %}{% end %}
+    {% block js_init %}{% endblock js_init %}
 }
 
-{% block js %}{% end %}
+{% block js %}{% endblock js %}
 
 $(document).ready(init);
 
@@ -68,22 +67,22 @@ $(document).ready(init);
   <body class="admin">
     <div id="global">
       <div id="sidebar">
-{% if current_user is None %}
+{% if admin is undefined %}
         <div id="sidebar_header">
           <h1 class="parent">Administration</h1>
         </div>
 {% else %}
         <div id="sidebar_header">
           <div class="login_notice">
-            Hello, <a href="{{ url_root }}/admins">{{ current_user.name }}</a>.
-              <form class="inline" action="{{ url_root }}/logout" method="POST">{% module xsrf_form_html() %}<input type="submit" value="Logout"></form>
+            Hello, <a href="{{ url("admins") }}">{{ admin.name }}</a>.
+              <form class="inline" action="{{ url("logout") }}" method="POST">{{ xsrf_form_html|safe }}<input type="submit" value="Logout"></form>
           </div>
-          {% if contest is None %}
+          {% if contest is none %}
           <h1 class="parent">Administration</h1>
           {% else %}
-          <h1 class="parent"><a href="{{ url_root }}">Administration</a></h1>
+          <h1 class="parent"><a href="{{ url() }}">Administration</a></h1>
           <h1 class="child">{{ contest.name }}</h1>
-          {% end %}
+          {% endif %}
         </div>
         {% if config.secret_key == config.secret_key_default %}
         <div class="secret_notice">
@@ -91,156 +90,162 @@ $(document).ready(init);
           For example,<br/>
           {{ get_hex_random_key() }}
         </div>
-        {% end %}
+        {% endif %}
         <ul class="menu">
-          <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/{% if contest is not None %}contest/{{ contest.id }}/overview{% end %}">Overview</a></li>
-          <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/{% if contest is None %}resourceslist{% else %}contest/{{ contest.id }}/resourceslist{% end %}">Resource usage</a></li>
+        {% if contest is none %}
+          <li class="menu_entry"><a class="menu_link" href="{{ url() }}">Overview</a></li>
+          <li class="menu_entry"><a class="menu_link" href="{{ url("resourceslist") }}">Resource usage</a></li>
+        {% else %}
+          <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "overview") }}">Overview</a></li>
+          <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "resourceslist") }}">Resource usage</a></li>
+        {% endif %}
         </ul>
         <div class="hr"></div>
 
-        {% if contest is None %}
-        <h1><a class="menu_link" href="{{ url_root }}/contests">Contests</a></h1>
+        {% if contest is none %}
+        <h1><a class="menu_link" href="{{ url("contests") }}">Contests</a></h1>
         <ul class="menu">
-          {% if len(contest_list) < 1 %}
+          {% if contest_list|length < 1 %}
           <li class="menu_entry">
             (no contests available)
           </li>
-          {% end %}
+          {% endif %}
 
           {% for c in contest_list[:5] %}
           <li class="menu_entry">
-            <a class="menu_link bold" href="{{ url_root }}/contest/{{ c.id }}" title="{{ c.description }}">
+            <a class="menu_link bold" href="{{ url("contest", c.id) }}" title="{{ c.description }}">
               {{ c.name }}
             </a>
           </li>
-          {% end %}
+          {% endfor %}
 
-          {% if len(contest_list) > 5 %}
+          {% if contest_list|length > 5 %}
           <li>
-            <a class="menu_link" href="{{ url_root }}/contests">
+            <a class="menu_link" href="{{ url("contests") }}">
               (show more...)
             </a>
           </li>
-          {% end %}
+          {% endif %}
 
-{% if current_user.permission_all %}
+{% if admin.permission_all %}
           <li class="menu_entry">
-            <a class="menu_link" href="{{ url_root }}/contests/add">
+            <a class="menu_link" href="{{ url("contests", "add") }}">
               (create new contest...)
             </a>
           </li>
-{% end %}
+{% endif %}
         </ul>
 
-        <h1><a class="menu_link" href="{{ url_root }}/tasks">Tasks</a></h1>
+        <h1><a class="menu_link" href="{{ url("tasks") }}">Tasks</a></h1>
         <ul class="menu">
-          {% if len(task_list) < 1 %}
+          {% if task_list|length < 1 %}
           <li class="menu_entry">
             (no tasks available)
           </li>
-          {% end %}
+          {% endif %}
 
           {% for t in task_list[:5] %}
           <li class="menu_entry">
-            <a class="menu_link bold" href="{{ url_root }}/task/{{ t.id }}" title="{{ t.title }}">
+            <a class="menu_link bold" href="{{ url("task", t.id) }}" title="{{ t.title }}">
               {{ t.name }}
             </a>
           </li>
-          {% end %}
+          {% endfor %}
 
-          {% if len(task_list) > 5 %}
+          {% if task_list|length > 5 %}
           <li>
-            <a class="menu_link" href="{{ url_root }}/tasks">
+            <a class="menu_link" href="{{ url("tasks") }}">
               (show more...)
             </a>
           </li>
-          {% end %}
+          {% endif %}
 
-{% if current_user.permission_all %}
+{% if admin.permission_all %}
           <li class="menu_entry">
-            <a class="menu_link" href="{{ url_root }}/tasks/add">
+            <a class="menu_link" href="{{ url("tasks", "add") }}">
               (create new task...)
             </a>
           </li>
-{% end %}
+{% endif %}
         </ul>
 
-        <h1><a class="menu_link" href="{{ url_root }}/users">Users</a></h1>
+        <h1><a class="menu_link" href="{{ url("users") }}">Users</a></h1>
         <ul class="menu">
-          {% if len(user_list) == 0 %}
+          {% if user_list|length == 0 %}
             <li class="menu_entry">
               (no user available)
             </li>
           {% else %}
             <li>
-              <a class="menu_link" href="{{ url_root }}/users">
-                {% if len(user_list) == 1 %}
+              <a class="menu_link" href="{{ url("users") }}">
+                {% if user_list|length == 1 %}
                   (show the only user...)
                 {% else %}
-                  (show the {{ len(user_list) }} users...)
-                {% end %}
+                  (show the {{ user_list|length }} users...)
+                {% endif %}
               </a>
             </li>
-          {% end %}
+          {% endif %}
 
-{% if current_user.permission_all %}
+{% if admin.permission_all %}
           <li class="menu_entry">
-            <a class="menu_link" href="{{ url_root }}/users/add">
+            <a class="menu_link" href="{{ url("users", "add") }}">
               (create new user...)
             </a>
           </li>
-{% end %}
+{% endif %}
         </ul>
 
-        <h1><a class="menu_link" href="{{ url_root }}/teams">Teams</a></h1>
+        <h1><a class="menu_link" href="{{ url("teams") }}">Teams</a></h1>
         <ul class="menu">
-          {% if len(team_list) == 0 %}
+          {% if team_list|length == 0 %}
             <li class="menu_entry">
               (no team available)
             </li>
           {% else %}
             <li>
-              <a class="menu_link" href="{{ url_root }}/teams">
-                {% if len(team_list) == 1 %}
+              <a class="menu_link" href="{{ url("teams") }}">
+                {% if team_list|length == 1 %}
                   (show the only team...)
                 {% else %}
-                  (show the {{ len(team_list) }} teams...)
-                {% end %}
+                  (show the {{ team_list|length }} teams...)
+                {% endif %}
               </a>
             </li>
-          {% end %}
+          {% endif %}
 
-{% if current_user.permission_all %}
+{% if admin.permission_all %}
           <li class="menu_entry">
-            <a class="menu_link" href="{{ url_root }}/teams/add">
+            <a class="menu_link" href="{{ url("teams", "add") }}">
               (create new team...)
             </a>
           </li>
-{% end %}
+{% endif %}
         </ul>
         {% else %}
           <ul class="menu">
-            <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}">General</a></li>
-            <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}/ranking">Ranking</a></li>
-            <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}/submissions">Submissions</a></li>
-            {% if contest.allow_user_tests %}<li class="menu_entry"><a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}/user_tests">User tests</a></li>{% end %}
-            <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}/users">Users</a></li>
-            <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}/tasks">Tasks</a></li>
-            <li class="menu_entry"><a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}/announcements">Announcements</a></li>
+            <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id) }}">General</a></li>
+            <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "ranking") }}">Ranking</a></li>
+            <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "submissions") }}">Submissions</a></li>
+            {% if contest.allow_user_tests %}<li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "user_tests") }}">User tests</a></li>{% endif %}
+            <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "users") }}">Users</a></li>
+            <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "tasks") }}">Tasks</a></li>
+            <li class="menu_entry"><a class="menu_link" href="{{ url("contest", contest.id, "announcements") }}">Announcements</a></li>
             <li class="menu_entry">
               <span id="unanswered_questions" class="unread"
-                {% if unanswered == 0 %} style="display: none;" {% end %}>
+                {% if unanswered == 0 %} style="display: none;" {% endif %}>
                 {{ unanswered }}
               </span>
-              <a class="menu_link" href="{{ url_root }}/contest/{{ contest.id }}/questions">Questions</a>
+              <a class="menu_link" href="{{ url("contest", contest.id, "questions") }}">Questions</a>
             </li>
           </ul>
           <div class="hr"></div>
-          {% if phase != 1 %}
-          <div class="footer">Time left: <span id="remaining"></span></div>
-          {% end %}
-        {% end %}
-{% end %}
+          <div class="footer">
+            <span id="remaining_text"></span>
+            <span id="remaining_value"></span>
+          </div>
+        {% endif %}
+{% endif %}
         <div class="cr_notice">CMS <a href="http://github.com/cms-dev/cms/">codebase</a> is released under the<br/><a href="http://www.gnu.org/licenses/agpl.txt">GNU Affero General Public License</a>.</div>
       </div>
 
@@ -252,7 +257,7 @@ $(document).ready(init);
           <div id="subpage_background"></div>
           <div id="subpage_content"></div>
         </div>
-        {% block core %}{% end %}
+        {% block core %}{% endblock core %}
       </div>
 
     </div>

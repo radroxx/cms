@@ -1,12 +1,13 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2013 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
 # Copyright © 2010-2016 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2013-2016 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2013-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
+# Copyright © 2017 Amir Keivan Mohtashami <akmohtashami97@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -26,17 +27,19 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
-import json
 import logging
 
 from cms import ServiceCoord, config
 from cms.io import Executor, TriggeredService, rpc_method
-from cms.db import SessionGen, Submission, Dataset
-from cms.grading.scoretypes import get_score_type
-from cms.service import get_submission_results
+from cms.db import SessionGen, Submission, Dataset, get_submission_results
+
+from cmscommon.datetime import make_datetime
 
 from .scoringoperations import ScoringOperation, get_operations
 
@@ -97,23 +100,24 @@ class ScoringExecutor(Executor):
                                       operation.dataset_id))
 
             # Instantiate the score type.
-            score_type = get_score_type(dataset=dataset)
+            score_type = dataset.score_type_object
 
             # Compute score and fill it in the database.
             submission_result.score, \
                 submission_result.score_details, \
                 submission_result.public_score, \
                 submission_result.public_score_details, \
-                ranking_score_details = \
+                submission_result.ranking_score_details = \
                 score_type.compute_score(submission_result)
-            submission_result.ranking_score_details = \
-                json.dumps(ranking_score_details)
 
             # Store it.
             session.commit()
 
             # If dataset is the active one, update RWS.
             if dataset is submission.task.active_dataset:
+                logger.info(
+                    "Submission scored %.1f seconds after submission",
+                    (make_datetime() - submission.timestamp).total_seconds())
                 self.proxy_service.submission_scored(
                     submission_id=submission.id)
 
@@ -211,10 +215,9 @@ class ScoringService(TriggeredService):
 
         with SessionGen() as session:
             submission_results = \
-                get_submission_results(contest_id,
+                get_submission_results(session, contest_id,
                                        participation_id, task_id,
-                                       submission_id, dataset_id,
-                                       session=session)
+                                       submission_id, dataset_id).all()
 
             for sr in submission_results:
                 if sr.scored():

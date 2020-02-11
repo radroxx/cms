@@ -1,16 +1,13 @@
-{% extends base.html %}
+{% extends "base.html" %}
 
 {% block core %}
-{% from cms.grading.scoretypes import get_score_type %}
-{% set score_types = {} %}
-
 <h1>{{ user.first_name }} {{ user.last_name }} ({{ user.username }})</h1>
 
 <h2 id="title_participations" class="toggling_on">Participations</h2>
 <div id="participations">
 
-  <form action="{{ url_root }}/user/{{ user.id }}/add_participation" method="POST">
-    {% module xsrf_form_html() %}
+  <form action="{{ url("user", user.id, "add_participation") }}" method="POST">
+    {{ xsrf_form_html|safe }}
     Add a new participation:
     <select name="contest_id">
       <option value="null" selected>Select a contest</option>
@@ -18,7 +15,7 @@
       <option value="{{ c.id }}">
         {{ c.name }}
       </option>
-      {% end %}
+      {% endfor %}
     </select>
     <input type="checkbox" name="hidden" id="hidden" /><label for="hidden">Hidden</label>
     <input type="checkbox" name="unrestricted" id="unrestricted" /><label for="unrestricted">Unrestricted</label>
@@ -28,8 +25,8 @@
   {% if participations == [] %}
   <p>No participations found.</p>
   {% else %}
-  <form action="{{ url_root }}/user/{{ user.id }}/edit_participation" method="POST">
-    {% module xsrf_form_html() %}
+  <form action="{{ url("user", user.id, "edit_participation") }}" method="POST">
+    {{ xsrf_form_html|safe }}
     Edit selected participation:
     <input type="submit" name="operation" value="Remove" />
     <table class="bordered">
@@ -49,17 +46,17 @@
           <td>
             <input type="radio" name="contest_id" value="{{ p.contest.id }}"/>
           </td>
-          <td><a href="{{ url_root }}/contest/{{ p.contest.id }}/user/{{ p.user.id }}/edit">{{ p.user.username }}</a></td>
+          <td><a href="{{ url("contest", p.contest.id, "user", p.user.id, "edit") }}">{{ p.user.username }}</a></td>
           <td>{{ p.hidden }}</td>
           <td>{{ p.unrestricted }}</td>
-          <td><a href="{{ url_root }}/contest/{{ p.contest.id }}">{{ p.contest.name }}</a></td>
+          <td><a href="{{ url("contest", p.contest.id) }}">{{ p.contest.name }}</a></td>
           <td>{{ p.contest.description }}</td>
         </tr>
-        {% end %}
+        {% endfor %}
       </tbody>
     </table>
   </form>
-  {% end %}
+  {% endif %}
   <div class="hr"></div>
 </div>
 
@@ -67,8 +64,8 @@
 <h2 id="title_general_info" class="toggling_on">General Information</h2>
 <div id="general_info">
   <!-- We use "multipart/form-data" to have Tornado distinguish between missing and empty values. -->
-  <form enctype="multipart/form-data" action="{{ url_root }}/user/{{ user.id }}" method="POST" style="display:inline;">
-    {% module xsrf_form_html() %}
+  <form enctype="multipart/form-data" action="{{ url("user", user.id) }}" method="POST" style="display:inline;">
+    {{ xsrf_form_html|safe }}
     <table>
       <tr>
         <td>
@@ -96,15 +93,17 @@
           <span class="info" title="Contestant password. Caution: stored in plain text."></span>
           Password
         </td>
-        <!-- FIXME: Plain text? -->
-        <td><input type="text" name="password" value="{{ user.password }}"/></td>
+        <td>
+          {% set hashed_password = user.password %}
+          {% include "fragments/hashed_password_form.html" %}
+        </td>
       </tr>
       <tr>
         <td>
           <span class="info" title="Contestant e-mail address."></span>
           E-mail
         </td>
-        <td><input type="text" name="email" value="{{ user.email if user.email is not None else "" }}"/></td>
+        <td><input type="text" name="email" value="{{ user.email if user.email is not none else "" }}"/></td>
       </tr>
       <tr>
         <td>
@@ -112,33 +111,33 @@
                                     Example: 'Europe/Rome', 'America/New_York', ..."></span>
           Timezone
         </td>
-        <td><input type="text" name="timezone" value="{{ user.timezone if user.timezone is not None else "" }}"></td>
+        <td><input type="text" name="timezone" value="{{ user.timezone if user.timezone is not none else "" }}"></td>
       </tr>
       <tr>
         <td>
-          <span class="info" title="JSON-encoded list of language codes, from the most to the least preferred.
-                                    Example: '[&quot;en&quot;, &quot;ja&quot;]'."></span>
+          <span class="info" title="Comma-separated list of language codes, from the most to the least preferred.
+                                    Example: 'en, ja'."></span>
           Preferred languages
         </td>
-        <td><input type="text" name="preferred_languages" value="{{ user.preferred_languages }}"></td>
+        <td><input type="text" name="preferred_languages" value="{{ user.preferred_languages|join(", ") }}"></td>
       </tr>
     </table>
     <input type="submit" value="Update" />
     <input type="reset" value="Reset" />
   </form>
-  <form action="{{ url_root }}/users" method="POST" style="display:inline;">
-      {% module xsrf_form_html() %}
-      <input type="hidden" name="user_id" value="{{user.id}}"/>
+  <form action="{{ url("users") }}" method="POST" style="display:inline;">
+      {{ xsrf_form_html|safe }}
+      <input type="hidden" name="user_id" value="{{ user.id }}"/>
       <input type="submit"
            name="operation"
            value="Remove" style="float: right;"
-  {% if not current_user.permission_all %}
+  {% if not admin.permission_all %}
            disabled
-  {% end %}
+  {% endif %}
            />
   </form>
   <div class="hr"></div>
 </div>
 
 
-{% end %}
+{% endblock core %}

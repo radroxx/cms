@@ -19,7 +19,7 @@ Contest administrators can limit the ability of users to submit submissions and 
 
 - ``min_submission_interval`` / ``min_user_test_interval``
 
-  These set, respectively, the minimum amount of time, in minutes, the user is required to wait after a submission or user test has been submitted before they are allowed to send in new ones. Any attempt to submit a submission or user test before this timeout has expired will fail.
+  These set, respectively, the minimum amount of time, in seconds, the user is required to wait after a submission or user test has been submitted before they are allowed to send in new ones. Any attempt to submit a submission or user test before this timeout has expired will fail.
 
 The limits can be set both for individual tasks and for the whole contest. A submission or user test is accepted if it verifies the conditions on both the task *and* the contest. This means that a submission or user test will be accepted if the number of submissions or user tests received so far for that task is strictly less that the task's maximum number *and* the number of submissions or user tests received so far for the whole contest (i.e. in all tasks) is strictly less than the contest's maximum number. The same holds for the minimum interval too: a submission or user test will be accepted if the time passed since the last submission or user test for that task is greater than the task's minimum interval *and* the time passed since the last submission or user test received for the whole contest (i.e. in any of the tasks) is greater than the contest's minimum interval.
 
@@ -62,20 +62,23 @@ Computation of the score
 ========================
 
 
-Released submissions
---------------------
+The score of a contestant on the contest is always the sum of the score over all tasks. The score on a task depends on the score on each submission via the "score mode" (a setting that can be changed in AdminWebServer for each task).
 
-The score of a contestant for the contest is always the sum of the score for each task. The score for a task is the best score among the set of "released" submissions.
 
-Admins can use the configuration "Score mode" in AdminWebServer to change the way CMS defines the set of released submission. There are two ways, corresponding to the rules of IOI 2010-2012 and IOI 2013-.
+Score modes
+-----------
 
-In the first mode, used in IOI from 2010 to 2012, the released submissions are those on which the contestant used a token, plus the latest one submitted.
+The score mode determines how to compute the score of a contestant in a task from their submissions on that task. There are three score modes, corresponding to the rules of IOI in different years.
 
-In the second mode, used since 2013, the released submissions are all submissions.
+"Use best among tokened and last submissions" is the score mode that follows the rules of IOI 2010-2012. It is intended to be used with tasks having some private testcases, and that allow the use of tokens. The score on the task is the best score among "released" submissions. A submission is said to be released if the contestant used a token on it, or if it is the latest one submitted. The idea is that the contestants have to "choose" which submissions they want to use for grading.
 
-Usually, a task using the first mode will have a certain number of private testcases, and a limited sets of tokens. In this situation, you can think that contestants are required to "choose" the submission they want to use for grading, by submitting it last, or by using a token on it.
+"Use best among all submissions" is the score mode that follows the rules of IOI 2013-2016. The score on the task is simply the best score among all submissions.
 
-On the other hand, a task using the second mode usually has all testcases public, and therefore it would be silly to ask contestants to choose the submission (as they would always choose the one with the best score).
+"Use the sum over each subtask of the best result for that subtask across all submissions" is the score mode that follows the rules of IOI since 2017. It is intended to be used with tasks that have a group score type, like "GroupMin" (note that "group" and "subtask" are synonyms). The score on the task is the sum of the best score for each subtask, over all submissions. The difference with the previous score mode is that here a contestant can achieve the maximum score on the task even when no submission gets the maximum score (for example if each subtask is solved by exactly one submission).
+
+.. note::
+
+    OutputOnly tasks have a similar behavior to the score mode for IOI 2017-; namely, if a contestant doesn't submit the output of a testcase, CMS automatically fills in the latest submitted output for that testcase, if present. There is a difference, though: the IOI 2017- score mode would be as if CMS filled the missing output with the one obtaining the highest score, instead of the latest one. Therefore, it might still make sense to use this score mode, even with OutputOnly tasks.
 
 
 Score rounding
@@ -96,9 +99,9 @@ Languages
 Statements
 ----------
 
-When there are many statements for a certain task (which are often different translations of the same statement) contest administrators may want to highlight some of them to the users. These may include, for example, the "official" version of the statement (the one that is considered the reference version in case of questions or appeals) or the translations for the languages understood by that particular user. To do that the ``primary_statements`` field of the tasks and the users has to be used.
+When there are many statements for a certain task (which are often different translations of the same statement) contest administrators may want to highlight some of them to the users. These may include, for example, the "official" version of the statement (the one that is considered the reference version in case of questions or appeals) or the translations for the languages understood by that particular user. To do that the ``primary_statements`` field of the tasks and the ``preferred_languages`` field of the users has to be used.
 
-The ``primary_statements`` field for the tasks is a JSON-encoded list of strings: it specifies the language codes of the statements that will be highlighted to all users. A valid example is ``["en_US", "it"]``. The ``primary_statements`` field for the users is a JSON-encoded object of lists of strings. Each item in this object specifies a task by its name and provides a list of language codes of the statements to highlight. For example ``{"task1": ["de"], "task2": ["de_CH"]}``.
+The ``primary_statements`` field for the tasks is a list of strings: it specifies the language codes of the statements that will be highlighted to all users. A valid example is ``en_US, it``. The ``preferred_languages`` field for the users is a list of strings: it specifies the language codes of the statements to highlight. For example ``de, de_CH``.
 
 Note that users will always be able to access all statements, regardless of the ones that are highlighted. Note also that language codes in the form ``xx`` or ``xx_YY`` (where ``xx`` is an `ISO 639-1 code <http://www.iso.org/iso/language_codes.htm>`_ and ``YY`` is an `ISO 3166-1 code <http://www.iso.org/iso/country_codes.htm>`_) will be recognized and presented accordingly. For example ``en_AU`` will be shown as "English (Australia)".
 
@@ -121,12 +124,14 @@ When CWS needs to show a timestamp to the user it first tries to show it accordi
 User login
 ==========
 
-Users log into CWS using their credentials (username and a password), or automatically, matching their IP address.
+Users can log into CWS manually, using their credentials (username and a password), or they can get logged in automatically by CMS based on the IP address their requests are coming from.
 
-Logging in with IP based autologin
+Logging in with IP-based autologin
 ----------------------------------
 
-If the "IP based autologin" option in the contest configuration is set, CWS tries to find a user with the IP address of the request, and if it finds exactly one, the requester is automatically logged in as the user. If zero or more than one user match, CWS does not let the user in (and the incident is logged to allow troubleshooting).
+If the "IP-based autologin" option in the contest configuration is set, CWS tries to find a user that matches the IP address the request is coming from. If it finds exactly one user, the requester is automatically logged in as that user. If zero or more than one user match, CWS does not let the user in (and the incident is logged to allow troubleshooting).
+
+In general, each user can have multiple ranges of IP addresses associated to it. These are defined as a list of subnets in CIDR format (e.g., `192.168.1.0/24`). Only the subnets whose mask is maximal (i.e., `/32` for IPv4 or `/128` for IPv6) are considered for autologin purposes (subnets with non-maximal mask are still useful for IP-based restrictions, see below). The autologin will kick in if *any* of the subnets matches the IP of the request.
 
 .. warning::
 
@@ -139,16 +144,16 @@ If the autologin is not enabled, users can log in with username and password, wh
 
 A successfully logged in user needs to reauthenticate after ``cookie_duration`` seconds (specified in the :file:`cms.conf` file) from when they last visited a page.
 
-Even without autologin, it is possible to restrict the IP address or subnet that the user is using for accessing CWS, using the "IP based login restriction" option in the contest configuration (in which case, admins need to set ``num_proxies_used`` as before). If this is set, then the login will fail if the IP address that attempted it does not match at least one of the addresses or subnets specified in the participation settings. If the participation IP address is not set, then no restriction applies.
+Even without autologin, it is possible to restrict the IP address or subnet that the user is using for accessing CWS, using the "IP-based login restriction" option in the contest configuration (in which case, admins need to set ``num_proxies_used`` as before). If this is set, then the login will fail if the IP address that attempted it does not match at least one of the addresses or subnets specified in the participation settings. If the participation IP address is not set, then no restriction applies.
 
 Failure to login
 ----------------
 
 The following are some common reasons for login failures, all of them coming with some useful log message from CWS.
 
-- IP address mismatch (with IP based autologin): if the participation has the wrong IP address, or if more than one participation has the same IP address, then the login fails. Note that if the user is using the IP address of a different user, CWS will happily log them in without noticing anything.
+- IP address mismatch (with IP-based autologin): if the IP address doesn't match any subnet of any participation or if it matches some subnets of more than one participation, then the login fails. Note that if the user is using the IP address of a different user, CWS will happily log them in without noticing anything.
 
-- IP address mismatch (using IP based login restrictions): the login fails if the participation has the wrong IP address or subnet.
+- IP address mismatch (using IP-based login restrictions): the login fails if the request comes from an IP address that doesn't match any of the participation's IP subnets (non-maximal masks are taken into consideration here).
 
 - Blocked hidden participations: users whose participation is hidden cannot log in if "Block hidden participations" is set in the contest configuration.
 
@@ -176,7 +181,17 @@ Contest administrators can also alter the competition time of a contestant setti
 
 Both options have to be set to a non negative number. They can be used together, producing both their effects. Please read :doc:`Detailed timing configuration` for a more in-depth discussion of their exact effect.
 
-Note also that submissions sent during the extra time will continue to be considered when computing the score, even if the ``extra_time`` field of the user is later reset to zero (for example in case the user loses the appeal): you need to completely delete them from the database.
+Note also that submissions sent during the extra time will continue to be considered when computing the score, even if the ``extra_time`` field of the user is later reset to zero (for example in case the user loses the appeal): you need to completely delete them from the database or make them unofficial, and make sure the score in all rankings reflects the new state.
+
+
+Analysis mode
+=============
+
+After the contest it is often customary to allow contestants to see the results of all their submissions and use the grading system to try different solutions. CMS offers an analysis mode to do this. Solutions submitted during the analysis are evaluated as usual, but are marked as not official, and thus do not contribute to the rankings. Users will also be prevented from using tokens.
+
+The admins can enable the analysis mode in the contest configuration page in AWS; they also must set start end stop time (which must be after the contest end).
+
+By awarding extra time or adding delay to a contestant, it is possible to extend the contest time for a user over the start of the analysis. In this case, the start of the analysis will be postponed for this user. If the contest rules contemplate extra time or delay, we suggest to avoid starting the analysis right after the end of the contest.
 
 
 .. _configuringacontest_programming-languages:
@@ -193,8 +208,6 @@ C, C++ and Pascal are the default languages, and, together with Java with gcj, h
 PHP and Python have only been tested with Batch task types, and have not thoroughly analyzed for potential security and usability issues. Being run under the sandbox, they should be reasonably safe, but, for example, the libraries available to contestants might be hard to control.
 
 Java with JDK works with Batch and Communication task types. Under usual conditions (default submission format) contestants must name their class as the short name of the task.
-
-Other programming languages, or even other versions of the same languages, can be added by creating new specification files in :file:`cms/grading/languages`.
 
 .. warning::
 
@@ -220,3 +233,12 @@ Language details
 
 * Haskell support is provided by ``ghc``, and submissions are optimized with ``-O2``.
 
+* Rust support is provided by ``rustc``, and submissions are optimized with ``-O``.
+
+* C# uses the system version of the Mono compiler ``mcs`` and the runtime ``mono``. Submissions are optimized with ``-optimize+``.
+
+
+Custom languages
+----------------
+
+Additional languages can be defined if necessary. This works in the same way :ref:`as with task types <tasktypes_custom>`: the classes need to extend :py:class:`cms.grading.language.Language` and the entry point group is called `cms.grading.languages`.

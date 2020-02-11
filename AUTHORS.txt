@@ -25,7 +25,7 @@ Artem Iglikov (aka artikz) <artem.iglikov@gmail.com>
 Damien Leroy <damien.leroy@be-oi.be>
 Tubérculo Martínez <nlehmann@dcc.uchile.cl>
 Evgeny Martynov <evgeny@epochfail.com>
-Edoardo Morassutto <gianluigi988@gmail.com>
+Edoardo Morassutto <edoardo.morassutto@gmail.com>
 Kento Nikaido (aka snukent) <snukent@gmail.com>
 William Pettersson <william.pettersson@gmail.com>
 Ludwig Schmidt <ludwigschmidt2@gmail.com>
@@ -42,5 +42,7 @@ Petar Veličković <pv273@cam.ac.uk>
 Amir Keivan Mohtashami <akmohtashami97@gmail.com>
 Kārlis Seņko <karlis3p70l1ij@gmail.com>
 Peyman Jabbarzade Ganje <peyman.jabarzade@gmail.com>
+Valentin Rosca <rosca.valentin2012@gmail.com>
+Alexander Kernozhitsky <sh200105@mail.ru>
 And many other people that didn't write code, but provided useful
 comments, suggestions and feedback. :-)

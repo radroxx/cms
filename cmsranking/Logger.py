@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -18,8 +18,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import curses
 import logging
@@ -28,7 +31,7 @@ import sys
 import time
 from traceback import format_tb
 
-import gevent.coros
+import gevent.lock
 
 
 class StreamHandler(logging.StreamHandler):
@@ -42,7 +45,7 @@ class StreamHandler(logging.StreamHandler):
         """Set self.lock to a new gevent RLock.
 
         """
-        self.lock = gevent.coros.RLock()
+        self.lock = gevent.lock.RLock()
 
 
 class FileHandler(logging.FileHandler):
@@ -56,7 +59,7 @@ class FileHandler(logging.FileHandler):
         """Set self.lock to a new gevent RLock.
 
         """
-        self.lock = gevent.coros.RLock()
+        self.lock = gevent.lock.RLock()
 
 
 def has_color_support(stream):
@@ -224,7 +227,7 @@ class CustomFormatter(logging.Formatter):
 
         try:
             message = record.getMessage()
-        except Exception, exc:
+        except Exception as exc:
             message = 'Bad message (%r): %r' % (exc, record.__dict__)
 
         result += message.strip()

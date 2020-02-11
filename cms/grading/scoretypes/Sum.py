@@ -1,9 +1,9 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2012 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2012 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -20,12 +20,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iterkeys, itervalues
 
-import json
-
-from cms.grading.ScoreType import ScoreTypeAlone
+from . import ScoreTypeAlone
 
 
 # Dummy function to mark translatable string.
@@ -39,26 +41,37 @@ class Sum(ScoreTypeAlone):
 
     """
     # Mark strings for localization.
+    N_("#")
     N_("Outcome")
     N_("Details")
     N_("Execution time")
     N_("Memory used")
     N_("N/A")
     TEMPLATE = """\
-{% from cms.grading import format_status_text %}
-{% from cms.server import format_size %}
 <table class="testcase-list">
     <thead>
         <tr>
-            <th class="idx">{{ _("#") }}</th>
-            <th class="outcome">{{ _("Outcome") }}</th>
-            <th class="details">{{ _("Details") }}</th>
-            <th class="execution-time">{{ _("Execution time") }}</th>
-            <th class="memory-used">{{ _("Memory used") }}</th>
+            <th class="idx">
+                {% trans %}#{% endtrans %}
+            </th>
+            <th class="outcome">
+                {% trans %}Outcome{% endtrans %}
+            </th>
+            <th class="details">
+                {% trans %}Details{% endtrans %}
+            </th>
+    {% if feedback_level == FEEDBACK_LEVEL_FULL %}
+            <th class="execution-time">
+                {% trans %}Execution time{% endtrans %}
+            </th>
+            <th class="memory-used">
+                {% trans %}Memory used{% endtrans %}
+            </th>
+    {% endif %}
         </tr>
     </thead>
     <tbody>
-    {% for idx, tc in enumerate(details, start=1) %}
+    {% for tc in details %}
         {% if "outcome" in tc and "text" in tc %}
             {% if tc["outcome"] == "Correct" %}
         <tr class="correct">
@@ -66,32 +79,34 @@ class Sum(ScoreTypeAlone):
         <tr class="notcorrect">
             {% else %}
         <tr class="partiallycorrect">
-            {% end %}
-            <td class="idx">{{ idx }}</td>
+            {% endif %}
+            <td class="idx">{{ loop.index }}</td>
             <td class="outcome">{{ _(tc["outcome"]) }}</td>
-            <td class="details">{{ format_status_text(tc["text"], _) }}</td>
+            <td class="details">{{ tc["text"]|format_status_text }}</td>
+            {% if feedback_level == FEEDBACK_LEVEL_FULL %}
             <td class="execution-time">
-            {% if tc["time"] is not None %}
-                {{ _("%(seconds)0.3f s") % {'seconds': tc["time"]} }}
-            {% else %}
-                {{ _("N/A") }}
-            {% end %}
+                {% if tc["time"] is not none %}
+                {{ tc["time"]|format_duration }}
+                {% else %}
+                {% trans %}N/A{% endtrans %}
+                {% endif %}
             </td>
             <td class="memory-used">
-            {% if tc["memory"] is not None %}
-                {{ format_size(tc["memory"]) }}
-            {% else %}
-                {{ _("N/A") }}
-            {% end %}
+                {% if tc["memory"] is not none %}
+                {{ tc["memory"]|format_size }}
+                {% else %}
+                {% trans %}N/A{% endtrans %}
+                {% endif %}
             </td>
+            {% endif %}
         {% else %}
         <tr class="undefined">
-            <td colspan="4">
-                {{ _("N/A") }}
+            <td colspan="5">
+                {% trans %}N/A{% endtrans %}
             </td>
         </tr>
-        {% end %}
-    {% end %}
+        {% endif %}
+    {% endfor %}
     </tbody>
 </table>"""
 
@@ -99,7 +114,7 @@ class Sum(ScoreTypeAlone):
         """See ScoreType.max_score."""
         public_score = 0.0
         score = 0.0
-        for public in self.public_testcases.itervalues():
+        for public in itervalues(self.public_testcases):
             if public:
                 public_score += self.parameters
             score += self.parameters
@@ -109,10 +124,10 @@ class Sum(ScoreTypeAlone):
         """See ScoreType.compute_score."""
         # Actually, this means it didn't even compile!
         if not submission_result.evaluated():
-            return 0.0, "[]", 0.0, "[]", []
+            return 0.0, [], 0.0, [], []
 
         # XXX Lexicographical order by codename
-        indices = sorted(self.public_testcases.keys())
+        indices = sorted(iterkeys(self.public_testcases))
         evaluations = dict((ev.codename, ev)
                            for ev in submission_result.evaluations)
         testcases = []
@@ -137,9 +152,7 @@ class Sum(ScoreTypeAlone):
             else:
                 public_testcases.append({"idx": idx})
 
-        return score, json.dumps(testcases), \
-            public_score, json.dumps(public_testcases), \
-            []
+        return score, testcases, public_score, public_testcases, []
 
     def get_public_outcome(self, outcome):
         """Return a public outcome from an outcome.

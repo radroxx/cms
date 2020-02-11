@@ -3,6 +3,7 @@
  * Copyright © 2012-2014 Luca Wehrstedt <luca.wehrstedt@gmail.com>
  * Copyright © 2013 Fabian Gundlach <320pointsguy@gmail.com>
  * Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
+ * Copyright © 2018 Gregor Eesmaa <gregoreesmaa1@gmail.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -27,15 +28,18 @@
 var CMS = CMS || {};
 
 CMS.AWSUtils = function(url_root, timestamp,
-                        contest_start, contest_stop, phase) {
-    this.url_root = url_root;
+                        contest_start, contest_stop,
+                        analysis_start, analysis_stop,
+                        phase) {
+    this.url = CMS.AWSUtils.create_url_builder(url_root);
     this.first_date = new Date();
     this.last_notification = timestamp;
     this.timestamp = timestamp;
     this.contest_start = contest_start;
     this.contest_stop = contest_stop;
+    this.analysis_start = analysis_start;
+    this.analysis_stop = analysis_stop;
     this.phase = phase;
-    this.remaining_div = null;
     this.file_asked_name = "";
     this.file_asked_url = "";
 
@@ -43,6 +47,20 @@ CMS.AWSUtils = function(url_root, timestamp,
     if ("Notification" in window) {
         Notification.requestPermission();
     }
+};
+
+
+CMS.AWSUtils.create_url_builder = function(url_root) {
+    return function() {
+        var url = url_root;
+        for (var i = 0; i < arguments.length; ++i) {
+            if (url.substr(-1) != "/") {
+                url += "/";
+            }
+            url += encodeURIComponent(arguments[i]);
+        }
+        return url;
+    };
 };
 
 
@@ -159,7 +177,7 @@ CMS.AWSUtils.prototype.display_notification = function(type, timestamp,
         subject_string = $("<span>").text("Reply to your question. ");
     } else if (type == "new_question") {
         subject_string = $("<a>").text("New question: ")
-            .prop("href", this.url_root + '/contest/' + contest_id + '/questions');
+            .prop("href", this.url("contest", contest_id, "questions"));
     }
 
     var self = this;
@@ -184,14 +202,13 @@ CMS.AWSUtils.prototype.display_notification = function(type, timestamp,
 
     // Trigger a desktop notification as well (but only if it's needed)
     if (type !== "notification") {
-        this.desktop_notification(type, timestamp, subject, text, contest_id);
+        this.desktop_notification(type, timestamp, subject, text);
     }
 };
 
 
 CMS.AWSUtils.prototype.desktop_notification = function(type, timestamp,
-                                                       subject, text,
-                                                       contest_id) {
+                                                       subject, text) {
     // Check desktop notifications support
     if (!("Notification" in window)) {
         return;
@@ -204,9 +221,9 @@ CMS.AWSUtils.prototype.desktop_notification = function(type, timestamp,
 
     // Create notification
     if (Notification.permission === "granted") {
-        var notification = new Notification(subject, {
+        new Notification(subject, {
             "body": text,
-            "icon": "/favicon.ico"
+            "icon": this.url("static", "favicon.ico")
         });
     }
 };
@@ -222,10 +239,8 @@ CMS.AWSUtils.prototype.desktop_notification = function(type, timestamp,
 CMS.AWSUtils.prototype.update_unread_counts = function(delta_public, delta_private) {
     var unread_public = $("#unread_public");
     var unread_private = $("#unread_private");
-    var msgs_public = "";
-    var msgs_private = "";
     if (unread_public) {
-        var msg_public = parseInt(unread_public.text());
+        var msgs_public = parseInt(unread_public.text());
         msgs_public += delta_public;
         unread_public.text(msgs_public);
         if (msgs_public > 0) {
@@ -235,7 +250,7 @@ CMS.AWSUtils.prototype.update_unread_counts = function(delta_public, delta_priva
         }
     }
     if (unread_private) {
-        var msg_private = parseInt(unread_private.text());
+        var msgs_private = parseInt(unread_private.text());
         msgs_private += delta_private;
         unread_private.text(msgs_private);
         if (msgs_private > 0) {
@@ -255,7 +270,7 @@ CMS.AWSUtils.prototype.update_notifications = function() {
     var display_notification = this.bind_func(this, this.display_notification);
     var update_unread_counts = this.bind_func(this, this.update_unread_counts);
     this.ajax_request(
-        this.url_root + "/notifications",
+        this.url("notifications"),
         "last_notification=" + this.last_notification,
         function(response, error) {
             if (error == null) {
@@ -298,6 +313,121 @@ CMS.AWSUtils.prototype.close_notification = function(item) {
 
 
 /**
+ * Provides table row comparator for specified column and order.
+ */
+function get_table_row_comparator(column_idx, numeric, ascending) {
+    return function(a, b) {
+        var valA = $(a).children("td").eq(column_idx).text();
+        var valB = $(b).children("td").eq(column_idx).text();
+        var result = numeric
+            ? Number(valA) - Number(valB)
+            : valA.localeCompare(valB);
+        return ascending ? -result : result;
+    }
+}
+
+
+/**
+ * Sorts specified table by specified column in specified order.
+ */
+CMS.AWSUtils.sort_table = function(table, column_idx, ascending) {
+    var initial_column_idx = table.data("initial_sort_column_idx");
+    var ranks_column = table.data("ranks_column");
+    column_idx += ranks_column ? 1 : 0;
+    var table_rows = table
+        .children("tbody")
+        .children("tr");
+    var column_header = table
+        .children("thead")
+        .children("tr")
+        .children("th")
+        .eq(column_idx);
+    var settings = (column_header.attr("data-sort-settings") || "").split(" ");
+
+    var numeric = settings.indexOf("numeric") >= 0;
+
+    // If specified, flip column's natural order, e.g. due to meaning of values.
+    if (settings.indexOf("reversed") >= 0) {
+        ascending = !ascending;
+    }
+
+    // Normalize column index, converting negative to positive from the end.
+    column_idx = column_header.index();
+
+    // Reassign arrows to headers
+    table.find(".column-sort").html("&varr;");
+    column_header.find(".column-sort").html(ascending ? "&uarr;" : "&darr;");
+
+    // Do the sorting, by initial column and then by selected column.
+    table_rows
+        .sort(get_table_row_comparator(initial_column_idx, numeric, ascending))
+        .sort(get_table_row_comparator(column_idx, numeric, ascending))
+        .each(function(idx, row) {
+            table.children("tbody").append(row)
+        });
+
+    if (ranks_column) {
+        table_rows.each(function(idx, row) {
+            $(row).children("td").first().text(idx + 1)
+        });
+    }
+};
+
+
+/**
+ * Makes table sortable, adding ranks column and sorting buttons in header.
+ */
+CMS.AWSUtils.init_table_sort = function(table, ranks_column,
+                                        initial_column_idx,
+                                        initial_ascending) {
+    table.addClass("sortable");
+    var table_column_headers = table
+        .children("thead")
+        .children("tr");
+    var table_rows = table
+        .children("tbody")
+        .children("tr");
+
+    // Normalize column index, converting negative to positive from the end.
+    initial_column_idx = table_column_headers
+        .children("th")
+        .eq(initial_column_idx)
+        .index();
+
+    table.data("ranks_column", ranks_column);
+    table.data("initial_sort_column_idx", initial_column_idx);
+
+    // Declaring sort settings.
+    var previous_column_idx = initial_column_idx;
+    var ascending = initial_ascending;
+
+    // Add sorting indicators to column headers
+    table_column_headers
+        .children("th")
+        .each(function(column_idx, header) {
+            $("<a/>", {
+                href: "#",
+                class: "column-sort",
+                click: function() {
+                    ascending = !ascending && previous_column_idx == column_idx;
+                    previous_column_idx = column_idx;
+                    CMS.AWSUtils.sort_table(table, column_idx, ascending);
+                }
+            }).appendTo(header);
+        });
+
+    // Add ranks column
+    if (ranks_column) {
+        table_column_headers.prepend("<th>#</th>");
+        table_rows.prepend("<td></td>");
+    }
+
+    // Do initial sorting
+    CMS.AWSUtils.sort_table(table, initial_column_idx, initial_ascending);
+};
+
+
+/**
  * Return a string representation of the number with two digits.
  *
  * n (int): a number with one or two digits.
@@ -317,35 +447,41 @@ CMS.AWSUtils.prototype.two_digits = function(n) {
  * Update the remaining time showed in the "remaining" div.
  */
 CMS.AWSUtils.prototype.update_remaining_time = function() {
-    var sec_to_end = Infinity;
-    if (this.contest_stop != null) {
-        sec_to_end = this.contest_stop - this.timestamp ;
+    // We assume this.phase always is the correct phase (since this
+    // method also refreshes the page when the phase changes).
+    var relevant_timestamp = null;
+    var text = null;
+    if (this.phase === -1) {
+        relevant_timestamp = this.contest_start;
+        text = "To start of contest: "
+    } else if (this.phase === 0) {
+        relevant_timestamp = this.contest_stop;
+        text = "To end of contest: "
+    } else if (this.phase === 1) {
+        relevant_timestamp = this.analysis_start;
+        text = "To start of analysis: "
+    } else if (this.phase === 2) {
+        relevant_timestamp = this.analysis_stop;
+        text = "To end of analysis: "
     }
 
-    var sec_to_start = -Infinity;
-    if (this.contest_start != null) {
-        sec_to_start = this.contest_start - this.timestamp;
+    // We are in phase 3, nothing to show.
+    if (relevant_timestamp === null) {
+        return;
     }
 
+    // Compute actual seconds to next phase value, and if negative we
+    // refresh to update the phase.
     var now = new Date();
-    var nowsec_to_end = sec_to_end - (now - this.first_date) / 1000;
-    var nowsec_to_start = sec_to_start - (now - this.first_date) / 1000;
-    if ((nowsec_to_end <= 0 && this.phase == 0 ) ||
-        (nowsec_to_start <= 0 && this.phase == -1 )) {
-        window.location.href = this.url_root + "/";
+    var countdown_sec =
+        relevant_timestamp - this.timestamp - (now - this.first_date) / 1000;
+    if (countdown_sec <= 0) {
+        location.reload();
+        return;
     }
 
-    var countdown = nowsec_to_end;
-    if (this.phase == -1) {
-        countdown = nowsec_to_start;
-    }
-
-    if (this.remaining_div == null) {
-        this.remaining_div = $("#remaining");
-    }
-    if (this.remaining_div != null) {
-        this.remaining_div.text(this.format_countdown(countdown));
-    }
+    $("#remaining_text").text(text);
+    $("#remaining_value").text(this.format_countdown(countdown_sec));
 };
 
 
@@ -395,11 +531,10 @@ CMS.AWSUtils.prototype.repr_job = function(job) {
     }
 
     if (object_type == 'submission') {
-        return job_type + ' the <a href="' + this.url_root + '/submission/'
-            + job["object_id"] + '/' + job["dataset_id"] + '">result</a> of <a href="' + this.url_root
-            + '/submission/' + job["object_id"] + '">submission ' + job["object_id"]
-            + '</a> on <a href="' + this.url_root + '/dataset/' + job["dataset_id"]
-            + '">dataset ' + job["dataset_id"] + '</a>'
+        return job_type
+            + ' the <a href="' + this.url("submission", job["object_id"], job["dataset_id"]) + '">result</a>'
+            + ' of <a href="' + this.url("submission", job["object_id"]) + '">submission ' + job["object_id"] + '</a>'
+            + ' on <a href="' + this.url("dataset", job["dataset_id"]) + '">dataset ' + job["dataset_id"] + '</a>'
             + (job["multiplicity"]
                ? " [" + job["multiplicity"] + " time(s) in queue]"
                : "")
@@ -407,9 +542,10 @@ CMS.AWSUtils.prototype.repr_job = function(job) {
                ? " [testcase: `" + job["testcase_codename"] + "']"
                : "");
     } else {
-        return job_type + ' the result of user_test ' + job["object_id"]
-            + ' on <a href="' + this.url_root + '/dataset/' + job["dataset_id"]
-            + '">dataset ' + job["dataset_id"] + '</a>';
+        return job_type
+            + ' the result'
+            + ' of user_test ' + job["object_id"]
+            + ' on <a href="' + this.url("dataset", job["dataset_id"]) + '">dataset ' + job["dataset_id"] + '</a>';
     }
 };
 

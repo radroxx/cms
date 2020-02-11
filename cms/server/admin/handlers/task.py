@@ -1,11 +1,11 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2013 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2012-2014 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2012-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
 # Copyright © 2014 Fabian Gundlach <320pointsguy@gmail.com>
 # Copyright © 2016 Myungwoo Chun <mc.tamaki@gmail.com>
@@ -28,17 +28,19 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import itervalues
 
-import json
 import logging
 import traceback
 
 import tornado.web
 
-from cms.db import Attachment, Dataset, Session, Statement, Submission, \
-    SubmissionFormatElement, Task
+from cms.db import Attachment, Dataset, Session, Statement, Submission, Task
 from cmscommon.datetime import make_datetime
 
 from .base import BaseHandler, SimpleHandler, require_permission
@@ -50,7 +52,7 @@ logger = logging.getLogger(__name__)
 class AddTaskHandler(SimpleHandler("add_task.html", permission_all=True)):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self):
-        fallback_page = "/tasks/add"
+        fallback_page = self.url("tasks", "add")
 
         try:
             attrs = dict()
@@ -60,15 +62,14 @@ class AddTaskHandler(SimpleHandler("add_task.html", permission_all=True)):
             attrs["title"] = attrs["name"]
 
             # Set default submission format as ["taskname.%l"]
-            attrs["submission_format"] = \
-                [SubmissionFormatElement("%s.%%l" % attrs["name"])]
+            attrs["submission_format"] = ["%s.%%l" % attrs["name"]]
 
             # Create the task.
             task = Task(**attrs)
             self.sql_session.add(task)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
@@ -80,9 +81,9 @@ class AddTaskHandler(SimpleHandler("add_task.html", permission_all=True)):
             attrs["description"] = "Default"
             attrs["autojudge"] = True
             attrs["task_type"] = "Batch"
-            attrs["task_type_parameters"] = '["alone", ["", ""], "diff"]'
+            attrs["task_type_parameters"] = ["alone", ["", ""], "diff"]
             attrs["score_type"] = "Sum"
-            attrs["score_type_parameters"] = '100'
+            attrs["score_type_parameters"] = 100
             attrs["task"] = task
             dataset = Dataset(**attrs)
             self.sql_session.add(dataset)
@@ -91,15 +92,15 @@ class AddTaskHandler(SimpleHandler("add_task.html", permission_all=True)):
             task.active_dataset = dataset
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
 
         if self.try_commit():
             # Create the task on RWS.
-            self.application.service.proxy_service.reinitialize()
-            self.redirect("/task/%s" % task.id)
+            self.service.proxy_service.reinitialize()
+            self.redirect(self.url("task", task.id))
         else:
             self.redirect(fallback_page)
 
@@ -115,11 +116,7 @@ class TaskHandler(BaseHandler):
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
-        try:
-            self.r_params["primary_statements"] = \
-                json.loads(task.primary_statements)
-        except ValueError:
-            self.r_params["primary_statements"] = []
+        self.r_params["primary_statements"] = task.primary_statements
         self.r_params["submissions"] = \
             self.sql_session.query(Submission)\
                 .join(Task).filter(Task.id == task_id)\
@@ -144,13 +141,14 @@ class TaskHandler(BaseHandler):
             for statement in task.statements:
                 self.get_bool(primary_statements,
                               "primary_statement_%s" % statement)
-            attrs["primary_statements"] = json.dumps(sorted([
+            attrs["primary_statements"] = list(sorted([
                 k.replace("primary_statement_", "", 1)
                 for k in primary_statements
                 if primary_statements[k]
             ]))
 
             self.get_submission_format(attrs)
+            self.get_string(attrs, "feedback_level")
 
             self.get_string(attrs, "token_mode")
             self.get_int(attrs, "token_max_number")
@@ -173,9 +171,9 @@ class TaskHandler(BaseHandler):
             task.set_attrs(attrs)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
-            self.redirect("/task/%s" % task_id)
+            self.redirect(self.url("task", task_id))
             return
 
         for dataset in task.datasets:
@@ -193,20 +191,30 @@ class TaskHandler(BaseHandler):
                 dataset.set_attrs(attrs)
 
             except Exception as error:
-                self.application.service.add_notification(
+                self.service.add_notification(
                     make_datetime(), "Invalid field(s)", repr(error))
-                self.redirect("/task/%s" % task_id)
+                self.redirect(self.url("task", task_id))
                 return
 
-            for testcase in dataset.testcases.itervalues():
+            for testcase in itervalues(dataset.testcases):
                 testcase.public = bool(self.get_argument(
                     "testcase_%s_public" % testcase.id, False))
 
+            # Test that the score type parameters are valid.
+            try:
+                dataset.score_type_object
+            except (AssertionError, ValueError) as error:
+                self.application.service.add_notification(
+                    make_datetime(), "Invalid score type parameters",
+                    str(error))
+                self.redirect(self.url("task", task_id))
+                return
+
         if self.try_commit():
             # Update the task and score on RWS.
-            self.application.service.proxy_service.dataset_updated(
+            self.service.proxy_service.dataset_updated(
                 task_id=task.id)
-        self.redirect("/task/%s" % task_id)
+        self.redirect(self.url("task", task_id))
 
 
 class AddStatementHandler(BaseHandler):
@@ -216,6 +224,7 @@ class AddStatementHandler(BaseHandler):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def get(self, task_id):
         task = self.safe_get_item(Task, task_id)
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -223,13 +232,13 @@ class AddStatementHandler(BaseHandler):
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, task_id):
-        fallback_page = "/task/%s/statements/add" % task_id
+        fallback_page = self.url("task", task_id, "statements", "add")
 
         task = self.safe_get_item(Task, task_id)
 
         language = self.get_argument("language", "")
-        if language == "":
-            self.application.service.add_notification(
+        if len(language) == 0:
+            self.service.add_notification(
                 make_datetime(),
                 "No language code specified",
                 "The language code can be any string.")
@@ -237,7 +246,7 @@ class AddStatementHandler(BaseHandler):
             return
         statement = self.request.files["statement"][0]
         if not statement["filename"].endswith(".pdf"):
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Invalid task statement",
                 "The task statement must be a .pdf file.")
@@ -247,11 +256,11 @@ class AddStatementHandler(BaseHandler):
         self.sql_session.close()
 
         try:
-            digest = self.application.service.file_cacher.put_file_content(
+            digest = self.service.file_cacher.put_file_content(
                 statement["body"],
                 "Statement for task %s (lang: %s)" % (task_name, language))
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Task statement storage failed",
                 repr(error))
@@ -269,7 +278,7 @@ class AddStatementHandler(BaseHandler):
         self.sql_session.add(statement)
 
         if self.try_commit():
-            self.redirect("/task/%s" % task_id)
+            self.redirect(self.url("task", task_id))
         else:
             self.redirect(fallback_page)
 
@@ -303,6 +312,7 @@ class AddAttachmentHandler(BaseHandler):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def get(self, task_id):
         task = self.safe_get_item(Task, task_id)
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -310,7 +320,7 @@ class AddAttachmentHandler(BaseHandler):
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, task_id):
-        fallback_page = "/task/%s/attachments/add" % task_id
+        fallback_page = self.url("task", task_id, "attachments", "add")
 
         task = self.safe_get_item(Task, task_id)
 
@@ -319,11 +329,11 @@ class AddAttachmentHandler(BaseHandler):
         self.sql_session.close()
 
         try:
-            digest = self.application.service.file_cacher.put_file_content(
+            digest = self.service.file_cacher.put_file_content(
                 attachment["body"],
                 "Task attachment for %s" % task_name)
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Attachment storage failed",
                 repr(error))
@@ -340,7 +350,7 @@ class AddAttachmentHandler(BaseHandler):
         self.sql_session.add(attachment)
 
         if self.try_commit():
-            self.redirect("/task/%s" % task_id)
+            self.redirect(self.url("task", task_id))
         else:
             self.redirect(fallback_page)
 
@@ -380,6 +390,7 @@ class AddDatasetHandler(BaseHandler):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def get(self, task_id):
         task = self.safe_get_item(Task, task_id)
+        self.contest = task.contest
 
         original_dataset = None
         description = "Default"
@@ -394,7 +405,7 @@ class AddDatasetHandler(BaseHandler):
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, task_id):
-        fallback_page = "/task/%s/add_dataset" % task_id
+        fallback_page = self.url("task", task_id, "add_dataset")
 
         task = self.safe_get_item(Task, task_id)
 
@@ -406,7 +417,7 @@ class AddDatasetHandler(BaseHandler):
             # Ensure description is unique.
             if any(attrs["description"] == d.description
                    for d in task.datasets):
-                self.application.service.add_notification(
+                self.service.add_notification(
                     make_datetime(),
                     "Dataset name %r is already taken." % attrs["description"],
                     "Please choose a unique name for this dataset.")
@@ -426,7 +437,7 @@ class AddDatasetHandler(BaseHandler):
 
         except Exception as error:
             logger.warning("Invalid field: %s" % (traceback.format_exc()))
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
@@ -437,8 +448,8 @@ class AddDatasetHandler(BaseHandler):
             task.active_dataset = dataset
 
         if self.try_commit():
-            # self.application.service.scoring_service.reinitialize()
-            self.redirect("/task/%s" % task_id)
+            # self.service.scoring_service.reinitialize()
+            self.redirect(self.url("task", task_id))
         else:
             self.redirect(fallback_page)
 
@@ -457,13 +468,13 @@ class TaskListHandler(SimpleHandler("tasks.html")):
         operation = self.get_argument("operation")
 
         if operation == self.REMOVE:
-            asking_page = "/tasks/%s/remove" % task_id
+            asking_page = self.url("tasks", task_id, "remove")
             # Open asking for remove page
             self.redirect(asking_page)
         else:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid operation %s" % operation, "")
-            self.redirect("/tasks")
+            self.redirect(self.url("tasks"))
 
 
 class RemoveTaskHandler(BaseHandler):
@@ -498,7 +509,7 @@ class RemoveTaskHandler(BaseHandler):
             for task in following_tasks:
                 task.num -= 1
         if self.try_commit():
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
 
         # Maybe they'll want to do this again (for another task)
         self.write("../../tasks")

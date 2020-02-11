@@ -1,10 +1,11 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
-# Copyright © 2015-2016 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2015-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2016 Myungwoo Chun <mc.tamaki@gmail.com>
 # Copyright © 2016 Peyman Jabbarzade Ganje <peyman.jabarzade@gmail.com>
+# Copyright © 2016 Amir Keivan Mohtashami <akmohtashami97@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -20,8 +21,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 from .base import \
     FileFromDigestHandler, \
@@ -57,7 +61,8 @@ from .contestannouncement import \
 from .contestquestion import \
     QuestionsHandler, \
     QuestionReplyHandler, \
-    QuestionIgnoreHandler
+    QuestionIgnoreHandler, \
+    QuestionClaimHandler
 from .contestranking import \
     RankingHandler
 from .task import \
@@ -99,6 +104,7 @@ from .admin import \
 from .submission import \
     SubmissionHandler, \
     SubmissionCommentHandler, \
+    SubmissionOfficialStatusHandler, \
     SubmissionFileHandler
 from .usertest import \
     UserTestHandler, \
@@ -155,6 +161,7 @@ HANDLERS = [
     (r"/contest/([0-9]+)/questions", QuestionsHandler),
     (r"/contest/([0-9]+)/question/([0-9]+)/reply", QuestionReplyHandler),
     (r"/contest/([0-9]+)/question/([0-9]+)/ignore", QuestionIgnoreHandler),
+    (r"/contest/([0-9]+)/question/([0-9]+)/claim", QuestionClaimHandler),
 
     # Contest's ranking
 
@@ -210,12 +217,18 @@ HANDLERS = [
 
     (r"/submission/([0-9]+)(?:/([0-9]+))?", SubmissionHandler),
     (r"/submission/([0-9]+)(?:/([0-9]+))?/comment", SubmissionCommentHandler),
+    (r"/submission/([0-9]+)(?:/([0-9]+))?/official",
+     SubmissionOfficialStatusHandler),
     (r"/submission_file/([0-9]+)", SubmissionFileHandler),
 
     # User tests
 
     (r"/user_test/([0-9]+)(?:/([0-9]+))?", UserTestHandler),
     (r"/user_test_file/([0-9]+)", UserTestFileHandler),
+
+    # The following prefixes are handled by WSGI middlewares:
+    # * /rpc, defined in cms/io/web_service.py
+    # * /static, defined in cms/io/web_service.py
 ]
 
 

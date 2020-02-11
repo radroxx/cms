@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -27,20 +27,24 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iterkeys, iteritems
 
 import logging
 import random
 
 from datetime import timedelta
 
-import gevent.coros
+import gevent.lock
 
 from gevent.event import Event
 
-from cms.db import Dataset, SessionGen, Submission, UserTest
-from cms.grading.Job import Job, JobGroup
+from cms.db import SessionGen
+from cms.grading.Job import JobGroup
 from cmscommon.datetime import make_datetime, make_timestamp
 
 
@@ -100,7 +104,7 @@ class WorkerPool(object):
 
         # A lock to ensure that the reverse lookup stays in sync with
         # the operations lists.
-        self._operation_lock = gevent.coros.RLock()
+        self._operation_lock = gevent.lock.RLock()
 
         # Event set when there are workers available to take jobs. It
         # is only guaranteed that if a worker is available, then this
@@ -217,31 +221,11 @@ class WorkerPool(object):
         self._start_time[shard] = make_datetime()
 
         with SessionGen() as session:
-            jobs = []
-            datasets = {}
-            submissions = {}
-            user_tests = {}
-            for operation in operations:
-                if operation.dataset_id not in datasets:
-                    datasets[operation.dataset_id] = Dataset.get_from_id(
-                        operation.dataset_id, session)
-                object_ = None
-                if operation.for_submission():
-                    if operation.object_id not in submissions:
-                        submissions[operation.object_id] = \
-                            Submission.get_from_id(
-                                operation.object_id, session)
-                    object_ = submissions[operation.object_id]
-                else:
-                    if operation.object_id not in user_tests:
-                        user_tests[operation.object_id] = \
-                            UserTest.get_from_id(operation.object_id, session)
-                    object_ = user_tests[operation.object_id]
-                logger.info("Asking worker %s to `%s'.", shard, operation)
+            job_group_dict = \
+                JobGroup.from_operations(operations, session).export_to_dict()
 
-                jobs.append(Job.from_operation(
-                    operation, object_, datasets[operation.dataset_id]))
-            job_group_dict = JobGroup(jobs).export_to_dict()
+        logger.info("Asking worker %s to %s.", shard,
+                    ", ".join("`%s'" % operation for operation in operations))
 
         self._worker[shard].execute_job_group(
             job_group_dict=job_group_dict,
@@ -314,7 +298,7 @@ class WorkerPool(object):
 
         """
         pool = []
-        for shard, worker_operation in self._operations.iteritems():
+        for shard, worker_operation in iteritems(self._operations):
             if worker_operation == operation:
                 if not require_connection or self._worker[shard].connected:
                     pool.append(shard)
@@ -352,7 +336,7 @@ class WorkerPool(object):
 
         """
         result = dict()
-        for shard in self._worker.keys():
+        for shard in iterkeys(self._worker):
             s_time = self._start_time[shard]
             s_time = make_timestamp(s_time) if s_time is not None else None
 
@@ -368,7 +352,7 @@ class WorkerPool(object):
     def check_timeouts(self):
         """Check if some worker is not responding in too much time. If
         this is the case, the worker is scheduled for disabling, and
-        we send him a message trying to shut it down.
+        we send it a message trying to shut it down.
 
         return ([ESOperation]): list of operations assigned to worker
             that timeout.
@@ -401,7 +385,7 @@ class WorkerPool(object):
                                 lost_operations.append(operation)
 
                     # Also, we are not trusting it, so we are not
-                    # assigning him new operations even if it comes back to
+                    # assigning it new operations even if it comes back to
                     # life.
                     self._schedule_disabling[shard] = True
                     self._ignore[shard] = True

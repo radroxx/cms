@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -23,11 +23,16 @@ on notifications and sweeper loops.
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import with_metaclass
 
 import logging
 import time
+from abc import ABCMeta, abstractmethod
 
 import gevent
 from gevent.event import Event
@@ -39,7 +44,7 @@ from cmscommon.datetime import monotonic_time
 logger = logging.getLogger(__name__)
 
 
-class Executor(object):  # pylint: disable=R0921
+class Executor(with_metaclass(ABCMeta, object)):  # pylint: disable=R0921
 
     """A class taking care of executing operations.
 
@@ -167,6 +172,7 @@ class Executor(object):  # pylint: disable=R0921
         """
         return 0
 
+    @abstractmethod
     def execute(self, entry):
         """Perform a single operation.
 
@@ -180,7 +186,7 @@ class Executor(object):  # pylint: disable=R0921
             re-enqueue the item.
 
         """
-        raise NotImplementedError("Please use a subclass.")
+        pass
 
 
 class TriggeredService(Service):

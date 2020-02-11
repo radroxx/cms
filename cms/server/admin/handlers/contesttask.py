@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -27,8 +27,11 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 from cms.db import Contest, Task
 from cmscommon.datetime import make_datetime
@@ -49,13 +52,13 @@ class ContestTasksHandler(BaseHandler):
         self.r_params["contest"] = self.contest
         self.r_params["unassigned_tasks"] = \
             self.sql_session.query(Task)\
-                .filter(Task.contest == None)\
-                .all()  # noqa
+                .filter(Task.contest_id.is_(None))\
+                .all()
         self.render("contest_tasks.html", **self.r_params)
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, contest_id):
-        fallback_page = "/contest/%s/tasks" % contest_id
+        fallback_page = self.url("contest", contest_id, "tasks")
 
         self.contest = self.safe_get_item(Contest, contest_id)
 
@@ -68,7 +71,7 @@ class ContestTasksHandler(BaseHandler):
                 self.MOVE_DOWN
             ), "Please select a valid operation"
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
@@ -83,13 +86,16 @@ class ContestTasksHandler(BaseHandler):
             # Unassign the task to the contest.
             task.contest = None
             task.num = None  # not strictly necessary
+            self.sql_session.flush()
 
             # Decrease by 1 the num of every subsequent task.
             for t in self.sql_session.query(Task)\
                          .filter(Task.contest == self.contest)\
                          .filter(Task.num > task_num)\
+                         .order_by(Task.num)\
                          .all():
                 t.num -= 1
+                self.sql_session.flush()
 
         elif operation == self.MOVE_UP:
             task2 = self.sql_session.query(Task)\
@@ -112,7 +118,7 @@ class ContestTasksHandler(BaseHandler):
 
         if self.try_commit():
             # Create the user on RWS.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
 
         # Maybe they'll want to do this again (for another task)
         self.redirect(fallback_page)
@@ -121,7 +127,7 @@ class ContestTasksHandler(BaseHandler):
 class AddContestTaskHandler(BaseHandler):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, contest_id):
-        fallback_page = "/contest/%s/tasks" % contest_id
+        fallback_page = self.url("contest", contest_id, "tasks")
 
         self.contest = self.safe_get_item(Contest, contest_id)
 
@@ -130,7 +136,7 @@ class AddContestTaskHandler(BaseHandler):
             # Check that the admin selected some task.
             assert task_id != "null", "Please select a valid task"
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
@@ -143,7 +149,7 @@ class AddContestTaskHandler(BaseHandler):
 
         if self.try_commit():
             # Create the user on RWS.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
 
         # Maybe they'll want to do this again (for another task)
         self.redirect(fallback_page)

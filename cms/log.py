@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -45,13 +45,16 @@
 # http://hg.python.org/cpython/file/69ee9b554eca/Lib/logging/handlers.py
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import logging
 import sys
 
-import gevent.coros
+import gevent.lock
 
 from cmscommon.terminal import colors, add_color_to_string, has_color_support
 
@@ -67,7 +70,7 @@ class StreamHandler(logging.StreamHandler):
         """Set self.lock to a new gevent RLock.
 
         """
-        self.lock = gevent.coros.RLock()
+        self.lock = gevent.lock.RLock()
 
 
 class FileHandler(logging.FileHandler):
@@ -81,7 +84,7 @@ class FileHandler(logging.FileHandler):
         """Set self.lock to a new gevent RLock.
 
         """
-        self.lock = gevent.coros.RLock()
+        self.lock = gevent.lock.RLock()
 
 
 class LogServiceHandler(logging.Handler):
@@ -119,7 +122,7 @@ class LogServiceHandler(logging.Handler):
         """Set self.lock to a new gevent RLock.
 
         """
-        self.lock = gevent.coros.RLock()
+        self.lock = gevent.lock.RLock()
 
     # Taken from CPython, combining emit and makePickle, and adapted to
     # not pickle the dictionary and use its items as keyword parameters
@@ -252,11 +255,11 @@ class CustomFormatter(logging.Formatter):
             severity = add_color_to_string(severity, severity_col,
                                            bold=True, force=True)
             coordinates_col = get_color_hash(coordinates)
-            if coordinates != "":
+            if len(coordinates) > 0:
                 coordinates = add_color_to_string(coordinates, coordinates_col,
                                                   bold=True, force=True)
             operation_col = get_color_hash(operation)
-            if operation != "":
+            if len(operation) > 0:
                 operation = add_color_to_string(operation, operation_col,
                                                 bold=True, force=True)
 

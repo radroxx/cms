@@ -1,14 +1,15 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2014 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2013-2014 Luca Wehrstedt <luca.wehrstedt@gmail.com>
-# Copyright © 2014-2016 William Di Luigi <williamdiluigi@gmail.com>
+# Copyright © 2013-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2014-2018 William Di Luigi <williamdiluigi@gmail.com>
 # Copyright © 2015 Luca Chiodini <luca@chiodini.org>
 # Copyright © 2016 Andrea Cracco <guilucand@gmail.com>
+# Copyright © 2018 Edoardo Morassutto <edoardo.morassutto@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -24,8 +25,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
-from __future__ import unicode_literals
+from __future__ import division
 from __future__ import print_function
+from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import io
 import logging
@@ -35,14 +39,18 @@ import sys
 import yaml
 from datetime import timedelta
 
-from cms import SCORE_MODE_MAX, SCORE_MODE_MAX_TOKENED_LAST
-from cms.db import Contest, User, Task, Statement, Attachment, \
-    Team, SubmissionFormatElement, Dataset, Manager, Testcase
+from cms import TOKEN_MODE_DISABLED, TOKEN_MODE_FINITE, TOKEN_MODE_INFINITE
+from cms.db import Contest, User, Task, Statement, Attachment, Team, Dataset, \
+    Manager, Testcase
 from cms.grading.languagemanager import LANGUAGES, HEADER_EXTS
+from cmscommon.constants import \
+    SCORE_MODE_MAX, SCORE_MODE_MAX_SUBTASK, SCORE_MODE_MAX_TOKENED_LAST
+from cmscommon.crypto import build_password
 from cmscommon.datetime import make_datetime
 from cmscontrib import touch
 
 from .base_loader import ContestLoader, TaskLoader, UserLoader, TeamLoader
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +59,14 @@ logger = logging.getLogger(__name__)
 # (see http://stackoverflow.com/questions/2890146).
 def construct_yaml_str(self, node):
     return self.construct_scalar(node)
+
+
 yaml.Loader.add_constructor("tag:yaml.org,2002:str", construct_yaml_str)
 yaml.SafeLoader.add_constructor("tag:yaml.org,2002:str", construct_yaml_str)
+
+
+def getmtime(fname):
+    return os.stat(fname).st_mtime
 
 
 def load(src, dst, src_name, dst_name=None, conv=lambda i: i):
@@ -174,12 +188,12 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
                 "update it.")
             # Determine the mode.
             if conf.get("token_initial", None) is None:
-                args["token_mode"] = "disabled"
+                args["token_mode"] = TOKEN_MODE_DISABLED
             elif conf.get("token_gen_number", 0) > 0 and \
                     conf.get("token_gen_time", 0) == 0:
-                args["token_mode"] = "infinite"
+                args["token_mode"] = TOKEN_MODE_INFINITE
             else:
-                args["token_mode"] = "finite"
+                args["token_mode"] = TOKEN_MODE_FINITE
             # Set the old default values.
             args["token_gen_initial"] = 0
             args["token_gen_number"] = 0
@@ -209,6 +223,8 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
 
         tasks = load(conf, None, ["tasks", "problemi"])
         participations = load(conf, None, ["users", "utenti"])
+        for p in participations:
+            p["password"] = build_password(p["password"])
 
         # Import was successful
         os.remove(os.path.join(self.path, ".import_error_contest"))
@@ -245,7 +261,7 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
             return None
 
         load(conf, args, "username")
-        load(conf, args, "password")
+        load(conf, args, "password", conv=build_password)
 
         load(conf, args, ["first_name", "nome"])
         load(conf, args, ["last_name", "cognome"])
@@ -363,17 +379,18 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
             else:
                 logger.critical("Couldn't find any task statement, aborting.")
                 sys.exit(1)
-            args["statements"] = [Statement(primary_language, digest)]
+            args["statements"] = {
+                primary_language: Statement(primary_language, digest)
+            }
 
-            args["primary_statements"] = '["%s"]' % (primary_language)
+            args["primary_statements"] = [primary_language]
 
-        args["attachments"] = []  # FIXME Use auxiliary
-
-        args["submission_format"] = [
-            SubmissionFormatElement("%s.%%l" % name)]
+        args["submission_format"] = ["%s.%%l" % name]
 
         if conf.get("score_mode", None) == SCORE_MODE_MAX:
             args["score_mode"] = SCORE_MODE_MAX
+        elif conf.get("score_mode", None) == SCORE_MODE_MAX_SUBTASK:
+            args["score_mode"] = SCORE_MODE_MAX_SUBTASK
         elif conf.get("score_mode", None) == SCORE_MODE_MAX_TOKENED_LAST:
             args["score_mode"] = SCORE_MODE_MAX_TOKENED_LAST
 
@@ -393,12 +410,12 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
                 "will soon stop being supported, you're advised to update it.")
             # Determine the mode.
             if conf.get("token_initial", None) is None:
-                args["token_mode"] = "disabled"
+                args["token_mode"] = TOKEN_MODE_DISABLED
             elif conf.get("token_gen_number", 0) > 0 and \
                     conf.get("token_gen_time", 0) == 0:
-                args["token_mode"] = "infinite"
+                args["token_mode"] = TOKEN_MODE_INFINITE
             else:
-                args["token_mode"] = "finite"
+                args["token_mode"] = TOKEN_MODE_FINITE
             # Set the old default values.
             args["token_gen_initial"] = 0
             args["token_gen_number"] = 0
@@ -423,13 +440,13 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
         load(conf, args, "min_user_test_interval", conv=make_timedelta)
 
         # Attachments
-        args["attachments"] = []
+        args["attachments"] = dict()
         if os.path.exists(os.path.join(self.path, "att")):
             for filename in os.listdir(os.path.join(self.path, "att")):
                 digest = self.file_cacher.put_file_from_path(
                     os.path.join(self.path, "att", filename),
                     "Attachment %s for task %s" % (filename, name))
-                args["attachments"] += [Attachment(filename, digest)]
+                args["attachments"][filename] = Attachment(filename, digest)
 
         task = Task(**args)
 
@@ -521,7 +538,7 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
                         testcase, comment = splitted
                         testcase = testcase.strip()
                         comment = comment.strip()
-                        testcase_detected = testcase != ''
+                        testcase_detected = len(testcase) > 0
                         copy_testcase_detected = comment.startswith("COPY:")
                         subtask_detected = comment.startswith('ST:')
 
@@ -558,13 +575,13 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
                     n_input = testcases
                     if n_input != 0:
                         input_value = total_value / n_input
-                    args["score_type_parameters"] = "%s" % input_value
+                    args["score_type_parameters"] = input_value
                 else:
                     subtasks.append([points, testcases])
                     assert(100 == sum([int(st[0]) for st in subtasks]))
                     n_input = sum([int(st[1]) for st in subtasks])
                     args["score_type"] = "GroupMin"
-                    args["score_type_parameters"] = "%s" % subtasks
+                    args["score_type_parameters"] = subtasks
 
                 if "n_input" in conf:
                     assert int(conf['n_input']) == n_input
@@ -577,17 +594,27 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
             n_input = int(conf['n_input'])
             if n_input != 0:
                 input_value = total_value / n_input
-            args["score_type_parameters"] = "%s" % input_value
+            args["score_type_parameters"] = input_value
+
+        # Override score_type if explicitly specified
+        if "score_type" in conf and "score_type_parameters" in conf:
+            logger.info("Overriding 'score_type' and 'score_type_parameters' "
+                        "as per task.yaml")
+            load(conf, args, "score_type")
+            load(conf, args, "score_type_parameters")
+        elif "score_type" in conf or "score_type_parameters" in conf:
+            logger.warning("To override score type data, task.yaml must "
+                           "specify both 'score_type' and "
+                           "'score_type_parameters'.")
 
         # If output_only is set, then the task type is OutputOnly
         if conf.get('output_only', False):
             args["task_type"] = "OutputOnly"
             args["time_limit"] = None
             args["memory_limit"] = None
-            args["task_type_parameters"] = '["%s"]' % evaluation_param
-            task.submission_format = [
-                SubmissionFormatElement("output_%03d.txt" % i)
-                for i in xrange(n_input)]
+            args["task_type_parameters"] = [evaluation_param]
+            task.submission_format = \
+                ["output_%03d.txt" % i for i in range(n_input)]
 
         # If there is check/manager (or equivalent), then the task
         # type is Communication
@@ -601,7 +628,8 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
                         num_processes = 1
                     logger.info("Task type Communication")
                     args["task_type"] = "Communication"
-                    args["task_type_parameters"] = '[%d]' % num_processes
+                    args["task_type_parameters"] = \
+                        [num_processes, "stub", "fifo_io"]
                     digest = self.file_cacher.put_file_from_path(
                         path,
                         "Manager for task %s" % task.name)
@@ -637,12 +665,11 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
             else:
                 args["task_type"] = "Batch"
                 args["task_type_parameters"] = \
-                    '["%s", ["%s", "%s"], "%s"]' % \
-                    (compilation_param, infile_param, outfile_param,
-                     evaluation_param)
+                    [compilation_param, [infile_param, outfile_param],
+                     evaluation_param]
 
         args["testcases"] = []
-        for i in xrange(n_input):
+        for i in range(n_input):
             input_digest = self.file_cacher.put_file_from_path(
                 os.path.join(self.path, "input", "input%d.txt" % i),
                 "Input %d for task %s" % (i, task.name))
@@ -652,16 +679,18 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
             args["testcases"] += [
                 Testcase("%03d" % i, False, input_digest, output_digest)]
             if args["task_type"] == "OutputOnly":
-                task.attachments += [
-                    Attachment("input_%03d.txt" % i, input_digest)]
+                task.attachments.set(
+                    Attachment("input_%03d.txt" % i, input_digest))
         public_testcases = load(conf, None, ["public_testcases", "risultati"],
                                 conv=lambda x: "" if x is None else x)
         if public_testcases == "all":
             for t in args["testcases"]:
                 t.public = True
-        elif public_testcases != "":
+        elif len(public_testcases) > 0:
             for x in public_testcases.split(","):
                 args["testcases"][int(x.strip())].public = True
+        args["testcases"] = dict((tc.codename, tc) for tc in args["testcases"])
+        args["managers"] = dict((mg.filename, mg) for mg in args["managers"])
 
         dataset = Dataset(**args)
         task.active_dataset = dataset
@@ -685,8 +714,6 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
         # If there is no .itime file, we assume that the contest has changed
         if not os.path.exists(os.path.join(self.path, ".itime_contest")):
             return True
-
-        getmtime = lambda fname: os.stat(fname).st_mtime
 
         itime = getmtime(os.path.join(self.path, ".itime_contest"))
 
@@ -739,8 +766,6 @@ class YamlLoader(ContestLoader, TaskLoader, UserLoader, TeamLoader):
         # If there is no .itime file, we assume that the task has changed
         if not os.path.exists(os.path.join(self.path, ".itime")):
             return True
-
-        getmtime = lambda fname: os.stat(fname).st_mtime
 
         itime = getmtime(os.path.join(self.path, ".itime"))
 

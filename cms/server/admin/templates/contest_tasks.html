@@ -1,12 +1,12 @@
-{% extends base.html %}
+{% extends "base.html" %}
 
 {% block core %}
 <div class="core_title">
-  <h1>Tasks list of <a href="{{ url_root }}/contest/{{ contest.id }}">{{ contest.name }}</a></h1>
+  <h1>Tasks list of <a href="{{ url("contest", contest.id) }}">{{ contest.name }}</a></h1>
 </div>
 
-<form action="{{ url_root }}/contest/{{ contest.id }}/tasks/add" method="POST">
-  {% module xsrf_form_html() %}
+<form action="{{ url("contest", contest.id, "tasks", "add") }}" method="POST">
+  {{ xsrf_form_html|safe }}
   Add a new task:
   <select name="task_id">
     <option value="null" selected>Select a new task</option>
@@ -14,32 +14,32 @@
     <option value="{{ t.id }}">
       {{ t.name }}
     </option>
-    {% end %}
+    {% endfor %}
   </select>
   <input type="submit"
-{% if not current_user.permission_all %}
+{% if not admin.permission_all %}
          disabled
-{% end %}
+{% endif %}
          value="Add task" />
 </form>
 
-<form action="{{ url_root }}/contest/{{ contest.id }}/tasks" method="POST">
-  {% module xsrf_form_html() %}
+<form action="{{ url("contest", contest.id, "tasks") }}" method="POST">
+  {{ xsrf_form_html|safe }}
   Edit selected task:
   <input type="submit" name="operation"
-{% if not current_user.permission_all %}
+{% if not admin.permission_all %}
          disabled
-{% end %}
+{% endif %}
          value="Move up" />
   <input type="submit" name="operation"
-{% if not current_user.permission_all %}
+{% if not admin.permission_all %}
          disabled
-{% end %}
+{% endif %}
          value="Move down" />
   <input type="submit" name="operation"
-{% if not current_user.permission_all %}
+{% if not admin.permission_all %}
          disabled
-{% end %}
+{% endif %}
          value="Remove from contest" />
   <table class="bordered">
     <thead>
@@ -55,11 +55,11 @@
         <td>
           <input type="radio" name="task_id" value="{{ t.id }}"/>
         </td>
-        <td><a href="{{ url_root }}/task/{{ t.id }}">{{ t.name }}</a></td>
+        <td><a href="{{ url("task", t.id) }}">{{ t.name }}</a></td>
         <td>{{ t.title }}</td>
       </tr>
-      {% end %}
+      {% endfor %}
     </tbody>
   </table>
 </form>
-{% end %}
+{% endblock core %}

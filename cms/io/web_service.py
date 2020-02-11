@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -21,8 +21,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import logging
 
@@ -35,11 +38,17 @@ from gevent.pywsgi import WSGIServer
 from werkzeug.wsgi import DispatcherMiddleware, SharedDataMiddleware
 from werkzeug.contrib.fixers import ProxyFix
 
+from cms.db.filecacher import FileCacher
+from cms.server.file_middleware import FileServerMiddleware
+
 from .service import Service
 from .web_rpc import RPCMiddleware
 
 
 logger = logging.getLogger(__name__)
+
+
+SECONDS_IN_A_YEAR = 365 * 24 * 60 * 60
 
 
 class WebService(Service):
@@ -62,8 +71,15 @@ class WebService(Service):
         self.wsgi_app.service = self
 
         for entry in static_files:
+            # TODO If we will introduce a flag to trigger autoreload in
+            # Jinja2 templates, use it to disable the cache arg here.
             self.wsgi_app = SharedDataMiddleware(
-                self.wsgi_app, {"/static": entry})
+                self.wsgi_app, {"/static": entry},
+                cache=True, cache_timeout=SECONDS_IN_A_YEAR,
+                fallback_mimetype="application/octet-stream")
+
+        self.file_cacher = FileCacher(self)
+        self.wsgi_app = FileServerMiddleware(self.file_cacher, self.wsgi_app)
 
         if rpc_enabled:
             self.wsgi_app = DispatcherMiddleware(
@@ -92,8 +108,16 @@ class WebService(Service):
         if num_proxies_used > 0:
             self.wsgi_app = ProxyFix(self.wsgi_app, num_proxies_used)
 
-        self.web_server = WSGIServer((listen_address, listen_port),
-                                     self.wsgi_app)
+        self.web_server = WSGIServer((listen_address, listen_port), self)
+
+    def __call__(self, environ, start_response):
+        """Execute this instance as a WSGI application.
+
+        See the PEP for the meaning of parameters. The separation of
+        __call__ and wsgi_app eases the insertion of middlewares.
+
+        """
+        return self.wsgi_app(environ, start_response)
 
     def run(self):
         """Start the WebService.

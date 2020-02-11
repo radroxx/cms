@@ -1,11 +1,11 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2014 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
 # Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2013 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2013-2017 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2014-2015 Luca Versari <veluca93@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -22,8 +22,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import argparse
 import io
@@ -76,6 +79,7 @@ def detect_data_dir():
     for _dir in DATA_DIRS:
         if os.path.exists(_dir):
             return os.path.abspath(_dir)
+
 
 DATA_DIR = detect_data_dir()
 
@@ -340,18 +344,25 @@ def iter_GEN(name):
 
         else:
             testcase, comment = splitted
+            is_trivial = comment.startswith(" ")
             testcase = testcase.strip()
             comment = comment.strip()
-            testcase_detected = testcase != ''
+            testcase_detected = len(testcase) > 0
             copy_testcase_detected = comment.startswith("COPY:")
             subtask_detected = comment.startswith('ST:')
 
             flags = [testcase_detected,
                      copy_testcase_detected,
                      subtask_detected]
-            if len([x for x in flags if x]) > 1:
+
+            flags_count = len([x for x in flags if x])
+
+            if flags_count > 1:
                 raise Exception("No testcase and command in"
                                 " the same line allowed")
+
+            if flags_count == 0 and not is_trivial:
+                raise Exception("Unrecognized non-trivial line")
 
             if testcase_detected:
                 yield (False, testcase, st)
@@ -445,7 +456,7 @@ def build_gen_list(base_dir, task_type, yaml_conf):
                 command.append("%s" % st)
             call(base_dir, command)
             n += 1
-            for i in xrange(3):
+            for _ in range(3):
                 move_cursor(directions.UP, erase=True, stream=sys.stderr)
 
     def make_output(n, assume=None):
@@ -515,16 +526,16 @@ def build_gen_list(base_dir, task_type, yaml_conf):
                     make_input,
                     "input generation"))
 
-    for n in xrange(testcase_num):
+    for n in range(testcase_num):
         actions.append(([os.path.join(INPUT_DIRNAME, 'input%d.txt' % (n)),
                          sol_exe],
                         [os.path.join(OUTPUT_DIRNAME, 'output%d.txt' % (n))],
                         functools.partial(make_output, n),
                         "output generation"))
     in_out_files = [os.path.join(INPUT_DIRNAME, 'input%d.txt' % (n))
-                    for n in xrange(testcase_num)] + \
+                    for n in range(testcase_num)] + \
                    [os.path.join(OUTPUT_DIRNAME, 'output%d.txt' % (n))
-                    for n in xrange(testcase_num)]
+                    for n in range(testcase_num)]
     return actions, in_out_files
 
 
@@ -579,9 +590,10 @@ def clean(base_dir, generated_list):
         pass
 
     # Delete compiled and/or backup files
-    os.system("find %s -name '*.o' -delete" % (base_dir))
-    os.system("find %s -name '*.pyc' -delete" % (base_dir))
-    os.system("find %s -name '*~' -delete" % (base_dir))
+    for dirname, _, filenames in os.walk(base_dir):
+        for filename in filenames:
+            if any(filename.endswith(ext) for ext in {".o", ".pyc", "~"}):
+                os.remove(os.path.join(dirname, filename))
 
 
 def build_execution_tree(actions):
@@ -755,6 +767,7 @@ def main():
         # After all work, possibly clean the left-overs of testing
         finally:
             clean_test_env()
+
 
 if __name__ == '__main__':
     main()

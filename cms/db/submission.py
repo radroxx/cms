@@ -1,13 +1,14 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2012 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
 # Copyright © 2010-2015 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2012-2015 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2012-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
 # Copyright © 2014 Fabian Gundlach <320pointsguy@gmail.com>
+# Copyright © 2016 Amir Keivan Mohtashami <akmohtashami97@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -27,18 +28,25 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
+from sqlalchemy import Boolean
 from sqlalchemy.schema import Column, ForeignKey, ForeignKeyConstraint, \
     UniqueConstraint
-from sqlalchemy.types import Integer, Float, String, Unicode, DateTime
-from sqlalchemy.orm import relationship, backref
-
-from . import Base, Participation, Task, Dataset, Testcase
-from .smartmappedcollection import smart_mapped_collection, smc_sa10_workaround
+from sqlalchemy.types import Integer, Float, String, Unicode, DateTime, Enum, \
+    BigInteger
+from sqlalchemy.orm import relationship
+from sqlalchemy.orm.collections import attribute_mapped_collection
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from cmscommon.datetime import make_datetime
+
+from . import Filename, FilenameSchema, Digest, Base, Participation, Task, \
+    Dataset, Testcase
 
 
 class Submission(Base):
@@ -62,9 +70,7 @@ class Submission(Base):
         index=True)
     participation = relationship(
         Participation,
-        backref=backref("submissions",
-                        cascade="all, delete-orphan",
-                        passive_deletes=True))
+        back_populates="submissions")
 
     # Task (id and object) of the submission.
     task_id = Column(
@@ -75,9 +81,7 @@ class Submission(Base):
         index=True)
     task = relationship(
         Task,
-        backref=backref("submissions",
-                        cascade="all, delete-orphan",
-                        passive_deletes=True))
+        back_populates="submissions")
 
     # Time of the submission.
     timestamp = Column(
@@ -95,16 +99,40 @@ class Submission(Base):
         nullable=False,
         default="")
 
+    # If false, submission will not be considered in contestant's score.
+    official = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+
     @property
     def short_comment(self):
         """The first line of the comment."""
         return self.comment.split("\n", 1)[0]
 
-    # Follows the description of the fields automatically added by
-    # SQLAlchemy.
-    # files (dict of File objects indexed by filename)
-    # token (Token object or None)
-    # results (list of SubmissionResult objects)
+    # These one-to-many relationships are the reversed directions of
+    # the ones defined in the "child" classes using foreign keys.
+
+    files = relationship(
+        "File",
+        collection_class=attribute_mapped_collection("filename"),
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        back_populates="submission")
+
+    token = relationship(
+        "Token",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        back_populates="submission")
+
+    results = relationship(
+        "SubmissionResult",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        back_populates="submission")
 
     def get_result(self, dataset=None):
         """Return the result associated to a dataset.
@@ -180,19 +208,16 @@ class File(Base):
                    onupdate="CASCADE", ondelete="CASCADE"),
         nullable=False,
         index=True)
-    submission = smc_sa10_workaround(relationship(
+    submission = relationship(
         Submission,
-        backref=backref('files',
-                        collection_class=smart_mapped_collection('filename'),
-                        cascade="all, delete-orphan",
-                        passive_deletes=True)))
+        back_populates="files")
 
     # Filename and digest of the submitted file.
     filename = Column(
-        Unicode,
+        FilenameSchema,
         nullable=False)
     digest = Column(
-        String,
+        Digest,
         nullable=False)
 
 
@@ -219,11 +244,7 @@ class Token(Base):
         index=True)
     submission = relationship(
         Submission,
-        backref=backref(
-            "token",
-            uselist=False,
-            cascade="all, delete-orphan",
-            passive_deletes=True),
+        back_populates="token",
         single_parent=True)
 
     # Time the token was played.
@@ -264,10 +285,7 @@ class SubmissionResult(Base):
         primary_key=True)
     submission = relationship(
         Submission,
-        backref=backref(
-            "results",
-            cascade="all, delete-orphan",
-            passive_deletes=True))
+        back_populates="results")
 
     dataset_id = Column(
         Integer,
@@ -283,13 +301,16 @@ class SubmissionResult(Base):
     # compilation successful and we can evaluate, "fail" =
     # compilation unsuccessful, throw it away).
     compilation_outcome = Column(
-        String,
+        Enum("ok", "fail", name="compilation_outcome"),
         nullable=True)
 
-    # String containing output from the sandbox.
+    # The output from the sandbox (to allow localization the first item
+    # of the list is a format string, possibly containing some "%s",
+    # that will be filled in using the remaining items of the list).
     compilation_text = Column(
-        String,
-        nullable=True)
+        ARRAY(String),
+        nullable=False,
+        default=[])
 
     # Number of failures during compilation.
     compilation_tries = Column(
@@ -313,7 +334,7 @@ class SubmissionResult(Base):
         Float,
         nullable=True)
     compilation_memory = Column(
-        Integer,
+        BigInteger,
         nullable=True)
 
     # Worker shard and sandbox where the compilation was performed.
@@ -328,7 +349,7 @@ class SubmissionResult(Base):
     # evaluation successful). At any time, this should be equal to
     # evaluations != [].
     evaluation_outcome = Column(
-        String,
+        Enum("ok", name="evaluation_outcome"),
         nullable=True)
 
     # Number of failures during evaluation.
@@ -342,35 +363,46 @@ class SubmissionResult(Base):
         Float,
         nullable=True)
 
-    # Score details. It's a JSON-encoded string containing information
+    # Score details. It's a JSON-like structure containing information
     # that is given to ScoreType.get_html_details to generate an HTML
     # snippet that is shown on AWS and, if the user used a token, on
     # CWS to display the details of the submission.
     # For example, results for each testcases, subtask, etc.
     score_details = Column(
-        String,
+        JSONB,
         nullable=True)
 
-    # The same as the last two fields, but from the point of view of
-    # the user (when he/she did not play a token).
+    # The same as the last two fields, but only showing information
+    # visible to the user (assuming they did not use a token on this
+    # submission).
     public_score = Column(
         Float,
         nullable=True)
     public_score_details = Column(
-        String,
+        JSONB,
         nullable=True)
 
     # Ranking score details. It is a list of strings that are going to
-    # be shown in a single row in the table of submission in RWS. JSON
-    # encoded.
+    # be shown in a single row in the table of submission in RWS.
     ranking_score_details = Column(
-        String,
+        ARRAY(String),
         nullable=True)
 
-    # Follows the description of the fields automatically added by
-    # SQLAlchemy.
-    # executables (dict of Executable objects indexed by filename)
-    # evaluations (list of Evaluation objects)
+    # These one-to-many relationships are the reversed directions of
+    # the ones defined in the "child" classes using foreign keys.
+
+    executables = relationship(
+        "Executable",
+        collection_class=attribute_mapped_collection("filename"),
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        back_populates="submission_result")
+
+    evaluations = relationship(
+        "Evaluation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        back_populates="submission_result")
 
     def get_status(self):
         """Return the status of this object.
@@ -410,6 +442,25 @@ class SubmissionResult(Base):
             .filter(Evaluation.testcase == testcase)\
             .first()
 
+    def get_max_evaluation_resources(self):
+        """Return the maximum time and memory used by this result
+
+        return (float|None, int|None): max used time in seconds and
+            memory in bytes, or None if data is incomplete or
+            unavailable.
+
+        """
+        t, m = None, None
+        if self.evaluated() and self.evaluations:
+            for ev in self.evaluations:
+                if ev.execution_time is not None \
+                        and (t is None or t < ev.execution_time):
+                    t = ev.execution_time
+                if ev.execution_memory is not None \
+                        and (m is None or m < ev.execution_memory):
+                    m = ev.execution_memory
+        return (t, m)
+
     def compiled(self):
         """Return whether the submission result has been compiled.
 
@@ -423,7 +474,7 @@ class SubmissionResult(Base):
         """Return a filtering expression for compiled submission results.
 
         """
-        return SubmissionResult.compilation_outcome != None  # noqa
+        return SubmissionResult.compilation_outcome.isnot(None)
 
     def compilation_failed(self):
         """Return whether the submission result did not compile.
@@ -474,7 +525,7 @@ class SubmissionResult(Base):
         """Return a filtering lambda for evaluated submission results.
 
         """
-        return SubmissionResult.evaluation_outcome != None  # noqa
+        return SubmissionResult.evaluation_outcome.isnot(None)
 
     def needs_scoring(self):
         """Return whether the submission result needs to be scored.
@@ -501,11 +552,11 @@ class SubmissionResult(Base):
         """Return a filtering lambda for scored submission results.
 
         """
-        return ((SubmissionResult.score != None)
-                & (SubmissionResult.score_details != None)
-                & (SubmissionResult.public_score != None)
-                & (SubmissionResult.public_score_details != None)
-                & (SubmissionResult.ranking_score_details != None))  # noqa
+        return ((SubmissionResult.score.isnot(None))
+                & (SubmissionResult.score_details.isnot(None))
+                & (SubmissionResult.public_score.isnot(None))
+                & (SubmissionResult.public_score_details.isnot(None))
+                & (SubmissionResult.ranking_score_details.isnot(None)))
 
     def invalidate_compilation(self):
         """Blank all compilation and evaluation outcomes, and the score.
@@ -513,7 +564,7 @@ class SubmissionResult(Base):
         """
         self.invalidate_evaluation()
         self.compilation_outcome = None
-        self.compilation_text = None
+        self.compilation_text = []
         self.compilation_tries = 0
         self.compilation_time = None
         self.compilation_wall_clock_time = None
@@ -598,19 +649,16 @@ class Executable(Base):
         viewonly=True)
 
     # SubmissionResult owning the executable.
-    submission_result = smc_sa10_workaround(relationship(
+    submission_result = relationship(
         SubmissionResult,
-        backref=backref('executables',
-                        collection_class=smart_mapped_collection('filename'),
-                        cascade="all, delete-orphan",
-                        passive_deletes=True)))
+        back_populates="executables")
 
     # Filename and digest of the generated executable.
     filename = Column(
-        Unicode,
+        Filename,
         nullable=False)
     digest = Column(
-        String,
+        Digest,
         nullable=False)
 
 
@@ -658,9 +706,7 @@ class Evaluation(Base):
     # SubmissionResult owning the evaluation.
     submission_result = relationship(
         SubmissionResult,
-        backref=backref('evaluations',
-                        cascade="all, delete-orphan",
-                        passive_deletes=True))
+        back_populates="evaluations")
 
     # Testcase (id and object) this evaluation was performed on.
     testcase_id = Column(
@@ -679,11 +725,14 @@ class Evaluation(Base):
         Unicode,
         nullable=True)
 
-    # String containing output from the grader (usually "Correct",
-    # "Time limit", ...).
+    # The output from the grader, usually "Correct", "Time limit", ...
+    # (to allow localization the first item of the list is a format
+    # string, possibly containing some "%s", that will be filled in
+    # using the remaining items of the list).
     text = Column(
-        String,
-        nullable=True)
+        ARRAY(String),
+        nullable=False,
+        default=[])
 
     # Evaluation's time and wall-clock time, in seconds.
     execution_time = Column(
@@ -695,7 +744,7 @@ class Evaluation(Base):
 
     # Memory used by the evaluation, in bytes.
     execution_memory = Column(
-        Integer,
+        BigInteger,
         nullable=True)
 
     # Worker shard and sandbox where the evaluation was performed.

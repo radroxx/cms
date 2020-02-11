@@ -1,15 +1,16 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2014 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2012-2014 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2012-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
 # Copyright © 2014 Fabian Gundlach <320pointsguy@gmail.com>
-# Copyright © 2015 William Di Luigi <williamdiluigi@gmail.com>
+# Copyright © 2015-2016 William Di Luigi <williamdiluigi@gmail.com>
+# Copyright © 2016 Amir Keivan Mohtashami <akmohtashami97@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -29,67 +30,38 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
-import json
 import logging
 
 import tornado.web
 
-from cms.server import actual_phase_required
-from cmscommon.isocodes import is_language_code, translate_language_code, \
-    is_country_code, translate_country_code, \
-    is_language_country_code, translate_language_country_code
+from cms.server import multi_contest
 from cmscommon.mimetypes import get_type_for_file_name
 
-from .base import BaseHandler, FileHandler
+from ..phase_management import actual_phase_required
+
+from .contest import ContestHandler, FileHandler
 
 
 logger = logging.getLogger(__name__)
 
 
-class TaskDescriptionHandler(BaseHandler):
+class TaskDescriptionHandler(ContestHandler):
     """Shows the data of a task in the contest.
 
     """
     @tornado.web.authenticated
-    @actual_phase_required(0)
+    @actual_phase_required(0, 3)
+    @multi_contest
     def get(self, task_name):
-        try:
-            task = self.contest.get_task(task_name)
-        except KeyError:
+        task = self.get_task(task_name)
+        if task is None:
             raise tornado.web.HTTPError(404)
-
-        for statement in task.statements.itervalues():
-            lang_code = statement.language
-            if is_language_country_code(lang_code):
-                statement.language_name = \
-                    translate_language_country_code(lang_code, self.locale)
-            elif is_language_code(lang_code):
-                statement.language_name = \
-                    translate_language_code(lang_code, self.locale)
-            elif is_country_code(lang_code):
-                statement.language_name = \
-                    translate_country_code(lang_code, self.locale)
-            else:
-                statement.language_name = lang_code
-
-        try:
-            self.r_params["primary_statements"] = \
-                json.loads(task.primary_statements)
-        except ValueError as e:
-            self.r_params["primary_statements"] = []
-            logger.error("Primary statements for task %s is invalid [%r].",
-                         task_name, e)
-
-        try:
-            self.r_params["user_primary"] = \
-                json.loads(self.current_user.user.preferred_languages)
-        except ValueError as e:
-            self.r_params["user_primary"] = []
-            logger.error("Preferred languages for user %s is invalid [%r].",
-                         self.current_user.user.username, e)
 
         self.render("task_description.html", task=task, **self.r_params)
 
@@ -99,11 +71,11 @@ class TaskStatementViewHandler(FileHandler):
 
     """
     @tornado.web.authenticated
-    @actual_phase_required(0)
+    @actual_phase_required(0, 3)
+    @multi_contest
     def get(self, task_name, lang_code):
-        try:
-            task = self.contest.get_task(task_name)
-        except KeyError:
+        task = self.get_task(task_name)
+        if task is None:
             raise tornado.web.HTTPError(404)
 
         if lang_code not in task.statements:
@@ -112,7 +84,7 @@ class TaskStatementViewHandler(FileHandler):
         statement = task.statements[lang_code].digest
         self.sql_session.close()
 
-        if lang_code != '':
+        if len(lang_code) > 0:
             filename = "%s (%s).pdf" % (task.name, lang_code)
         else:
             filename = "%s.pdf" % task.name
@@ -125,11 +97,11 @@ class TaskAttachmentViewHandler(FileHandler):
 
     """
     @tornado.web.authenticated
-    @actual_phase_required(0)
+    @actual_phase_required(0, 3)
+    @multi_contest
     def get(self, task_name, filename):
-        try:
-            task = self.contest.get_task(task_name)
-        except KeyError:
+        task = self.get_task(task_name)
+        if task is None:
             raise tornado.web.HTTPError(404)
 
         if filename not in task.attachments:

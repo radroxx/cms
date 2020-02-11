@@ -1,9 +1,9 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2014 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
 # Copyright © 2013-2015 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2013 Bernard Blackham <bernard@largestprime.net>
@@ -32,8 +32,12 @@ the current ranking.
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iterkeys, itervalues, iteritems
 
 import logging
 
@@ -41,17 +45,15 @@ from collections import defaultdict
 from datetime import timedelta
 from functools import wraps
 
-import gevent.coros
-
+import gevent.lock
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload
 
 from cms import ServiceCoord, get_service_shards
 from cms.io import Executor, TriggeredService, rpc_method
-from cms.db import SessionGen, Dataset, Submission, UserTest
-from cms.db.filecacher import FileCacher
-from cms.service import get_datasets_to_judge, \
-    get_submissions, get_submission_results
+from cms.db import SessionGen, Digest, Dataset, Evaluation, Submission, \
+    SubmissionResult, Testcase, UserTest, UserTestResult, get_submissions, \
+    get_submission_results, get_datasets_to_judge
 from cms.grading.Job import JobGroup
 
 from .esoperations import ESOperation, get_relevant_operations, \
@@ -86,13 +88,9 @@ class EvaluationExecutor(Executor):
         self._currently_executing = []
 
         # Lock used to guard the currently executing operations
-        self._current_execution_lock = gevent.coros.RLock()
+        self._current_execution_lock = gevent.lock.RLock()
 
-        # Whether execute need to drop the currently executing
-        # operation.
-        self._drop_current = False
-
-        for i in xrange(get_service_shards("Worker")):
+        for i in range(get_service_shards("Worker")):
             worker = ServiceCoord("Worker", i)
             self.pool.add_worker(worker)
 
@@ -145,7 +143,6 @@ class EvaluationExecutor(Executor):
                 # re-enqueue it.
                 operation.side_data = (entry.priority, entry.timestamp)
                 self._currently_executing.append(operation)
-        res = None
         while len(self._currently_executing) > 0:
             self.pool.wait_for_workers()
             with self._current_execution_lock:
@@ -153,7 +150,6 @@ class EvaluationExecutor(Executor):
                     break
                 res = self.pool.acquire_worker(self._currently_executing)
                 if res is not None:
-                    self._drop_current = False
                     self._currently_executing = []
                     break
 
@@ -260,7 +256,7 @@ class EvaluationService(TriggeredService):
         # invalidate_submission, enqueue) are not executed
         # concurrently with action_finished to avoid picking
         # operations in state 4.
-        self.post_finish_lock = gevent.coros.RLock()
+        self.post_finish_lock = gevent.lock.RLock()
 
         self.scoring_service = self.connect_to(
             ServiceCoord("ScoringService", 0))
@@ -430,22 +426,27 @@ class EvaluationService(TriggeredService):
         job_group = None
         job_group_success = True
         if error is not None:
-            logger.error("Received error from Worker: `%s'.", error)
+            logger.error(
+                "Received error from Worker (see above), job group lost.")
             job_group_success = False
 
         else:
             try:
                 job_group = JobGroup.import_from_dict(data)
-            except:
+            except Exception:
                 logger.error("Couldn't build JobGroup for data %s.", data,
                              exc_info=True)
                 job_group_success = False
 
         if job_group_success:
             for job in job_group.jobs:
-                operation = ESOperation.from_dict(job.operation)
-                logger.info("`%s' completed. Success: %s.",
-                            operation, job.success)
+                operation = job.operation
+                if job.success:
+                    logger.info("`%s' succeeded.", operation)
+                else:
+                    logger.error("`%s' failed, see worker logs and (possibly) "
+                                 "sandboxes at '%s'.",
+                                 operation, " ".join(job.sandboxes))
                 if isinstance(to_ignore, list) and operation in to_ignore:
                     logger.info("`%s' result ignored as requested", operation)
                 else:
@@ -476,47 +477,29 @@ class EvaluationService(TriggeredService):
             by_object_and_type[t].append((operation, result))
 
         with SessionGen() as session:
-            # Dictionary holding the objects we use repeatedly,
-            # indexed by id, to avoid querying them multiple times.
-            # TODO: this pattern is used in WorkerPool and should be
-            # abstracted away.
-            datasets = dict()
-            subs = dict()
-            srs = dict()
-
-            for key, operation_results in by_object_and_type.iteritems():
+            for key, operation_results in iteritems(by_object_and_type):
                 type_, object_id, dataset_id = key
 
-                # Get dataset.
-                if dataset_id not in datasets:
-                    datasets[dataset_id] = session.query(Dataset)\
-                        .filter(Dataset.id == dataset_id)\
-                        .options(joinedload(Dataset.testcases))\
-                        .first()
-                dataset = datasets[dataset_id]
+                dataset = Dataset.get_from_id(dataset_id, session)
                 if dataset is None:
                     logger.error("Could not find dataset %d in the database.",
                                  dataset_id)
                     continue
 
-                # Get submission or user test, and their results.
+                # Get submission or user test results.
                 if type_ in [ESOperation.COMPILATION, ESOperation.EVALUATION]:
-                    if object_id not in subs:
-                        subs[object_id] = \
-                            Submission.get_from_id(object_id, session)
-                    object_ = subs[object_id]
+                    object_ = Submission.get_from_id(object_id, session)
                     if object_ is None:
                         logger.error("Could not find submission %d "
                                      "in the database.", object_id)
                         continue
-                    result_id = (object_id, dataset_id)
-                    if result_id not in srs:
-                        srs[result_id] = object_.get_result_or_create(dataset)
-                    object_result = srs[result_id]
+                    object_result = object_.get_result_or_create(dataset)
                 else:
-                    # We do not cache user tests as they can come up
-                    # only once.
                     object_ = UserTest.get_from_id(object_id, session)
+                    if object_ is None:
+                        logger.error("Could not find user test %d "
+                                     "in the database.", object_id)
+                        continue
                     object_result = object_.get_result_or_create(dataset)
 
                 self.write_results_one_object_and_type(
@@ -525,12 +508,20 @@ class EvaluationService(TriggeredService):
             logger.info("Committing evaluations...")
             session.commit()
 
-            for type_, object_id, dataset_id in by_object_and_type:
+            num_testcases_per_dataset = dict()
+            for type_, object_id, dataset_id in iterkeys(by_object_and_type):
                 if type_ == ESOperation.EVALUATION:
-                    submission_result = srs[(object_id, dataset_id)]
-                    dataset = datasets[dataset_id]
-                    if len(submission_result.evaluations) == \
-                            len(dataset.testcases):
+                    if dataset_id not in num_testcases_per_dataset:
+                        num_testcases_per_dataset[dataset_id] = session\
+                            .query(func.count(Testcase.id))\
+                            .filter(Testcase.dataset_id == dataset_id).scalar()
+                    num_evaluations = session\
+                        .query(func.count(Evaluation.id)) \
+                        .filter(Evaluation.dataset_id == dataset_id) \
+                        .filter(Evaluation.submission_id == object_id).scalar()
+                    if num_evaluations == num_testcases_per_dataset[dataset_id]:
+                        submission_result = SubmissionResult.get_from_id(
+                            (object_id, dataset_id), session)
                         submission_result.set_evaluation_outcome()
 
             logger.info("Committing evaluation outcomes...")
@@ -538,23 +529,23 @@ class EvaluationService(TriggeredService):
 
             logger.info("Ending operations for %s objects...",
                         len(by_object_and_type))
-            for type_, object_id, dataset_id in by_object_and_type:
+            for type_, object_id, dataset_id in iterkeys(by_object_and_type):
                 if type_ == ESOperation.COMPILATION:
-                    submission_result = srs[(object_id, dataset_id)]
+                    submission_result = SubmissionResult.get_from_id(
+                        (object_id, dataset_id), session)
                     self.compilation_ended(submission_result)
                 elif type_ == ESOperation.EVALUATION:
-                    submission_result = srs[(object_id, dataset_id)]
+                    submission_result = SubmissionResult.get_from_id(
+                        (object_id, dataset_id), session)
                     if submission_result.evaluated():
                         self.evaluation_ended(submission_result)
                 elif type_ == ESOperation.USER_TEST_COMPILATION:
-                    user_test_result = UserTest\
-                        .get_from_id(object_id, session)\
-                        .get_result(datasets[dataset_id])
+                    user_test_result = UserTestResult.get_from_id(
+                        (object_id, dataset_id), session)
                     self.user_test_compilation_ended(user_test_result)
                 elif type_ == ESOperation.USER_TEST_EVALUATION:
-                    user_test_result = UserTest\
-                        .get_from_id(object_id, session)\
-                        .get_result(datasets[dataset_id])
+                    user_test_result = UserTestResult.get_from_id(
+                        (object_id, dataset_id), session)
                     self.user_test_evaluation_ended(user_test_result)
 
         logger.info("Done")
@@ -614,8 +605,8 @@ class EvaluationService(TriggeredService):
                    result.job.plus.get("tombstone") is True:
                     executable_digests = [
                         e.digest for e in
-                        object_result.executables.itervalues()]
-                    if FileCacher.TOMBSTONE_DIGEST in executable_digests:
+                        itervalues(object_result.executables)]
+                    if Digest.TOMBSTONE in executable_digests:
                         logger.info("Submission %d's compilation on dataset "
                                     "%d has been invalidated since the "
                                     "executable was the tombstone",
@@ -757,7 +748,7 @@ class EvaluationService(TriggeredService):
         elif not user_test_result.compiled():
             logger.warning("Worker failed when compiling user test "
                            "%d(%d).",
-                           user_test_result.submission_id,
+                           user_test_result.user_test_id,
                            user_test_result.dataset_id)
             if user_test_result.compilation_tries >= \
                     EvaluationService.MAX_USER_TEST_COMPILATION_TRIES:
@@ -896,13 +887,20 @@ class EvaluationService(TriggeredService):
             contest_id = self.contest_id
 
         with SessionGen() as session:
+            # When invalidating a dataset we need to know the task_id,
+            # otherwise get_submissions will return all the submissions of
+            # the contest.
+            if dataset_id is not None and task_id is None \
+                    and submission_id is None:
+                task_id = Dataset.get_from_id(dataset_id, session).task_id
             # First we load all involved submissions.
             submissions = get_submissions(
+                session,
                 # Give contest_id only if all others are None.
                 contest_id
                 if {participation_id, task_id, submission_id} == {None}
                 else None,
-                participation_id, task_id, submission_id, session)
+                participation_id, task_id, submission_id).all()
 
             # Then we get all relevant operations, and we remove them
             # both from the queue and from the pool (i.e., we ignore
@@ -922,6 +920,7 @@ class EvaluationService(TriggeredService):
             # Then we find all existing results in the database, and
             # we remove them.
             submission_results = get_submission_results(
+                session,
                 # Give contest_id only if all others are None.
                 contest_id
                 if {participation_id,
@@ -929,7 +928,11 @@ class EvaluationService(TriggeredService):
                     submission_id,
                     dataset_id} == {None}
                 else None,
-                participation_id, task_id, submission_id, dataset_id, session)
+                participation_id,
+                # Provide the task_id only if the entire task has to be
+                # reevaluated and not only a specific dataset.
+                task_id if dataset_id is None else None,
+                submission_id, dataset_id).all()
             logger.info("Submission results to invalidate %s for: %d.",
                         level, len(submission_results))
             for submission_result in submission_results:
@@ -1023,6 +1026,5 @@ class EvaluationService(TriggeredService):
                 entries_by_key[key] = entry
                 entries_by_key[key]["item"]["multiplicity"] = 1
         return sorted(
-            entries_by_key.values(),
-            lambda x, y: cmp((x["priority"], x["timestamp"]),
-                             (y["priority"], y["timestamp"])))
+            itervalues(entries_by_key),
+            key=lambda x: (x["priority"], x["timestamp"]))

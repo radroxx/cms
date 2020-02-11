@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -27,15 +27,17 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import json
 import logging
 
 from cms import ServiceCoord, get_service_shards, get_service_address
 from cms.db import Admin, Contest, Question
-from cms.server import filter_ascii
 from cmscommon.crypto import validate_password
 from cmscommon.datetime import make_datetime, make_timestamp
 
@@ -50,38 +52,49 @@ class LoginHandler(SimpleHandler("login.html", authenticated=False)):
 
     """
     def post(self):
+        error_args = {"login_error": "true"}
+        next_page = self.get_argument("next", None)
+        if next_page is not None:
+            error_args["next"] = next_page
+            if next_page != "/":
+                next_page = self.url(*next_page.strip("/").split("/"))
+            else:
+                next_page = self.url()
+        else:
+            next_page = self.url()
+        error_page = self.url("login", **error_args)
+
         username = self.get_argument("username", "")
         password = self.get_argument("password", "")
-        next_page = self.get_argument("next", "/")
         admin = self.sql_session.query(Admin)\
             .filter(Admin.username == username)\
             .first()
 
         if admin is None:
             logger.warning("Nonexistent admin account: %s", username)
-            self.redirect("/login?login_error=true")
+            self.redirect(error_page)
             return
 
         try:
             allowed = validate_password(admin.authentication, password)
         except ValueError:
-            logger.warning("Unable to validate password for admin %s",
-                           filter_ascii(username), exc_info=True)
+            logger.warning("Unable to validate password for admin %r", username,
+                           exc_info=True)
             allowed = False
 
         if not allowed or not admin.enabled:
             if not allowed:
-                logger.info("Login error for admin %s from IP %s.",
-                            filter_ascii(username), self.request.remote_ip)
+                logger.info("Login error for admin %r from IP %s.", username,
+                            self.request.remote_ip)
             elif not admin.enabled:
-                logger.info("Login successful for admin %s from IP %s, "
-                            "but account is disabled.",
-                            filter_ascii(username), self.request.remote_ip)
-            self.redirect("/login?login_error=true")
+                logger.info("Login successful for admin %r from IP %s, but "
+                            "account is disabled.", username,
+                            self.request.remote_ip)
+            self.redirect(error_page)
             return
 
-        logger.info("Admin logged in: %s from IP %s.",
-                    filter_ascii(username), self.request.remote_ip)
+        logger.info("Admin logged in: %r from IP %s.", username,
+                    self.request.remote_ip)
         self.service.auth_handler.set(admin.id)
         self.redirect(next_page)
 
@@ -92,7 +105,7 @@ class LogoutHandler(BaseHandler):
     """
     def post(self):
         self.service.auth_handler.clear()
-        self.redirect("/")
+        self.redirect(self.url())
 
 
 class ResourcesHandler(BaseHandler):
@@ -100,9 +113,9 @@ class ResourcesHandler(BaseHandler):
     def get(self, shard=None, contest_id=None):
         if contest_id is not None:
             self.contest = self.safe_get_item(Contest, contest_id)
-            contest_address = "/%s" % contest_id
+            contest_address = [contest_id]
         else:
-            contest_address = ""
+            contest_address = []
 
         if shard is None:
             shard = "all"
@@ -121,7 +134,7 @@ class ResourcesHandler(BaseHandler):
                 address = get_service_address(
                     ServiceCoord("ResourceService", shard))
             except KeyError:
-                self.redirect("/resourceslist%s" % contest_address)
+                self.redirect(self.url(*(["resourceslist"] + contest_address)))
                 return
             self.r_params["resource_addresses"][shard] = address.ip
 
@@ -141,9 +154,9 @@ class NotificationsHandler(BaseHandler):
         # Keep "== None" in filter arguments. SQLAlchemy does not
         # understand "is None".
         questions = self.sql_session.query(Question)\
-            .filter(Question.reply_timestamp == None)\
+            .filter(Question.reply_timestamp.is_(None))\
             .filter(Question.question_timestamp > last_notification)\
-            .all()  # noqa
+            .all()
 
         for question in questions:
             res.append({
@@ -155,11 +168,11 @@ class NotificationsHandler(BaseHandler):
             })
 
         # Simple notifications
-        for notification in self.application.service.notifications:
+        for notification in self.service.notifications:
             res.append({"type": "notification",
                         "timestamp": make_timestamp(notification[0]),
                         "subject": notification[1],
                         "text": notification[2]})
-        self.application.service.notifications = []
+        self.service.notifications = []
 
         self.write(json.dumps(res))

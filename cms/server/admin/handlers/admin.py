@@ -1,8 +1,8 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
-# Copyright © 2015 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2015-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2016 Myungwoo Chun <mc.tamaki@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -23,8 +23,12 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iterkeys
 
 import logging
 
@@ -72,7 +76,7 @@ def _admin_attrs(handler):
 class AddAdminHandler(SimpleHandler("add_admin.html", permission_all=True)):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self):
-        fallback_page = "/admins/add"
+        fallback_page = self.url("admins", "add")
 
         try:
             attrs = _admin_attrs(self)
@@ -83,13 +87,13 @@ class AddAdminHandler(SimpleHandler("add_admin.html", permission_all=True)):
             self.sql_session.add(admin)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
 
         if self.try_commit():
-            self.redirect("/admins")
+            self.redirect(self.url("admins"))
         else:
             self.redirect(fallback_page)
 
@@ -125,7 +129,7 @@ class AdminHandler(BaseHandler):
         admin = self.safe_get_item(Admin, admin_id)
 
         self.r_params = self.render_params()
-        self.r_params["admin"] = admin
+        self.r_params["admin_being_edited"] = admin
         self.render("admin.html", **self.r_params)
 
     @require_permission(BaseHandler.PERMISSION_ALL, self_allowed=True)
@@ -136,9 +140,9 @@ class AdminHandler(BaseHandler):
             new_attrs = _admin_attrs(self)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
-            self.redirect("/admin/%s" % admin_id)
+            self.redirect(self.url("admin", admin_id))
             return
 
         # If the admin is allowed here because has permission_all,
@@ -146,16 +150,16 @@ class AdminHandler(BaseHandler):
         # allowed because they are editing their own details, they can
         # only change a subset of the fields.
         if not self.current_user.permission_all:
-            for key in new_attrs.keys():
+            for key in iterkeys(new_attrs):
                 if key not in AdminHandler.SELF_MODIFIABLE_FIELDS:
                     del new_attrs[key]
         admin.set_attrs(new_attrs)
 
         if self.try_commit():
             logger.info("Admin %s updated.", admin.id)
-            self.redirect("/admins")
+            self.redirect(self.url("admins"))
         else:
-            self.redirect("/admin/%s" % admin_id)
+            self.redirect(self.url("admin", admin_id))
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def delete(self, admin_id):

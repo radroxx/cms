@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -22,13 +22,16 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 from sqlalchemy.schema import Column
 from sqlalchemy.types import Boolean, Integer, Unicode
 
-from . import Base
+from . import Codename, Base
 
 
 class Admin(Base):
@@ -54,7 +57,7 @@ class Admin(Base):
 
     # Username used to log in in AWS.
     username = Column(
-        Unicode,
+        Codename,
         nullable=False,
         unique=True)
 

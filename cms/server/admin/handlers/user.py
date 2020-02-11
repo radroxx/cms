@@ -1,14 +1,15 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2013 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
 # Copyright © 2010-2015 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2012-2014 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2012-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
 # Copyright © 2014 Fabian Gundlach <320pointsguy@gmail.com>
 # Copyright © 2016 Myungwoo Chun <mc.tamaki@gmail.com>
+# Copyright © 2017 Valentin Rosca <rosca.valentin2012@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -28,8 +29,11 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 from cms.db import Contest, Participation, Submission, Team, User
 from cmscommon.datetime import make_datetime
@@ -50,16 +54,16 @@ class UserHandler(BaseHandler):
                 .all()
         self.r_params["unassigned_contests"] = \
             self.sql_session.query(Contest)\
-                .filter(not Contest.id.in_(
+                .filter(Contest.id.notin_(
                     self.sql_session.query(Participation.contest_id)
-                        .filter(Participation.user is user)
+                        .filter(Participation.user == user)
                         .all()))\
                 .all()
         self.render("user.html", **self.r_params)
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, user_id):
-        fallback_page = "/user/%s" % user_id
+        fallback_page = self.url("user", user_id)
 
         user = self.safe_get_item(User, user_id)
 
@@ -69,9 +73,11 @@ class UserHandler(BaseHandler):
             self.get_string(attrs, "first_name")
             self.get_string(attrs, "last_name")
             self.get_string(attrs, "username", empty=None)
-            self.get_string(attrs, "password")
-            self.get_string(attrs, "email")
-            self.get_string(attrs, "preferred_languages")
+
+            self.get_password(attrs, user.password, False)
+
+            self.get_string(attrs, "email", empty=None)
+            self.get_string_list(attrs, "preferred_languages")
             self.get_string(attrs, "timezone", empty=None)
 
             assert attrs.get("username") is not None, \
@@ -81,14 +87,14 @@ class UserHandler(BaseHandler):
             user.set_attrs(attrs)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
 
         if self.try_commit():
             # Update the user on RWS.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
         self.redirect(fallback_page)
 
 
@@ -106,13 +112,13 @@ class UserListHandler(SimpleHandler("users.html")):
         operation = self.get_argument("operation")
 
         if operation == self.REMOVE:
-            asking_page = "/users/%s/remove" % user_id
+            asking_page = self.url("users", user_id, "remove")
             # Open asking for remove page
             self.redirect(asking_page)
         else:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid operation %s" % operation, "")
-            self.redirect("/contests")
+            self.redirect(self.url("contests"))
 
 
 class RemoveUserHandler(BaseHandler):
@@ -141,7 +147,7 @@ class RemoveUserHandler(BaseHandler):
 
         self.sql_session.delete(user)
         if self.try_commit():
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
 
         # Maybe they'll want to do this again (for another user)
         self.write("../../users")
@@ -161,7 +167,7 @@ class TeamHandler(BaseHandler):
         self.render("team.html", **self.r_params)
 
     def post(self, team_id):
-        fallback_page = "/team/%s" % team_id
+        fallback_page = self.url("team", team_id)
 
         team = self.safe_get_item(Team, team_id)
 
@@ -178,21 +184,21 @@ class TeamHandler(BaseHandler):
             team.set_attrs(attrs)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
 
         if self.try_commit():
             # Update the team on RWS.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
         self.redirect(fallback_page)
 
 
 class AddTeamHandler(SimpleHandler("add_team.html", permission_all=True)):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self):
-        fallback_page = "/teams/add"
+        fallback_page = self.url("teams", "add")
 
         try:
             attrs = dict()
@@ -208,14 +214,14 @@ class AddTeamHandler(SimpleHandler("add_team.html", permission_all=True)):
             self.sql_session.add(team)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
 
         if self.try_commit():
             # Create the team on RWS.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
 
         # In case other teams need to be added.
         self.redirect(fallback_page)
@@ -224,7 +230,7 @@ class AddTeamHandler(SimpleHandler("add_team.html", permission_all=True)):
 class AddUserHandler(SimpleHandler("add_user.html", permission_all=True)):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self):
-        fallback_page = "/users/add"
+        fallback_page = self.url("users", "add")
 
         try:
             attrs = dict()
@@ -232,30 +238,32 @@ class AddUserHandler(SimpleHandler("add_user.html", permission_all=True)):
             self.get_string(attrs, "first_name")
             self.get_string(attrs, "last_name")
             self.get_string(attrs, "username", empty=None)
-            self.get_string(attrs, "password")
-            self.get_string(attrs, "email")
+
+            self.get_password(attrs, None, False)
+
+            self.get_string(attrs, "email", empty=None)
 
             assert attrs.get("username") is not None, \
                 "No username specified."
 
             self.get_string(attrs, "timezone", empty=None)
 
-            self.get_string(attrs, "preferred_languages")
+            self.get_string_list(attrs, "preferred_languages")
 
             # Create the user.
             user = User(**attrs)
             self.sql_session.add(user)
 
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
 
         if self.try_commit():
             # Create the user on RWS.
-            self.application.service.proxy_service.reinitialize()
-            self.redirect("/user/%s" % user.id)
+            self.service.proxy_service.reinitialize()
+            self.redirect(self.url("user", user.id))
         else:
             self.redirect(fallback_page)
 
@@ -263,7 +271,7 @@ class AddUserHandler(SimpleHandler("add_user.html", permission_all=True)):
 class AddParticipationHandler(BaseHandler):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, user_id):
-        fallback_page = "/user/%s" % user_id
+        fallback_page = self.url("user", user_id)
 
         user = self.safe_get_item(User, user_id)
 
@@ -271,7 +279,7 @@ class AddParticipationHandler(BaseHandler):
             contest_id = self.get_argument("contest_id")
             assert contest_id != "null", "Please select a valid contest"
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
@@ -291,7 +299,7 @@ class AddParticipationHandler(BaseHandler):
 
         if self.try_commit():
             # Create the user on RWS.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
 
         # Maybe they'll want to do this again (for another contest).
         self.redirect(fallback_page)
@@ -300,7 +308,7 @@ class AddParticipationHandler(BaseHandler):
 class EditParticipationHandler(BaseHandler):
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, user_id):
-        fallback_page = "/user/%s" % user_id
+        fallback_page = self.url("user", user_id)
 
         user = self.safe_get_item(User, user_id)
 
@@ -312,7 +320,7 @@ class EditParticipationHandler(BaseHandler):
                 "Remove",
             ), "Please select a valid operation"
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
@@ -329,7 +337,7 @@ class EditParticipationHandler(BaseHandler):
 
         if self.try_commit():
             # Create the user on RWS.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
 
         # Maybe they'll want to do this again (for another contest).
         self.redirect(fallback_page)

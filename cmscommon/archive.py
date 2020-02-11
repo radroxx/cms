@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -23,9 +23,13 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
+import io
 import os
 import shutil
 import tempfile
@@ -65,7 +69,7 @@ class Archive(object):
 
         """
         try:
-            patoolib.test_archive(path)
+            patoolib.test_archive(path, interactive=False)
             return True
         except PatoolError:
             return False
@@ -81,7 +85,7 @@ class Archive(object):
         files = tuple(os.listdir(from_dir))
         cwd = os.getcwd()
         os.chdir(from_dir)
-        patoolib.create_archive(archive_path, files)
+        patoolib.create_archive(archive_path, files, interactive=False)
         os.chdir(cwd)
 
     @staticmethod
@@ -92,7 +96,7 @@ class Archive(object):
         to_dir (string): destination directory.
 
         """
-        patoolib.extract_archive(archive_path, outdir=to_dir)
+        patoolib.extract_archive(archive_path, outdir=to_dir, interactive=False)
 
     @staticmethod
     def from_raw_data(raw_data):
@@ -111,7 +115,7 @@ class Archive(object):
 
         """
         temp_file, temp_filename = tempfile.mkstemp(dir=config.temp_dir)
-        with os.fdopen(temp_file, "w") as temp_file:
+        with io.open(temp_file, "wb") as temp_file:
             temp_file.write(raw_data)
 
         try:
@@ -141,7 +145,8 @@ class Archive(object):
 
         """
         self.temp_dir = tempfile.mkdtemp(dir=config.temp_dir)
-        patoolib.extract_archive(self.path, outdir=self.temp_dir)
+        patoolib.extract_archive(self.path, outdir=self.temp_dir,
+                                 interactive=False)
         return self.temp_dir
 
     def repack(self, target):
@@ -185,12 +190,10 @@ class Archive(object):
             raise NotImplementedError("Cannot list before unpacking.")
         else:
             names = []
-            cwd = os.getcwd()
-            os.chdir(self.temp_dir)
-            for level in os.walk("."):
-                for filename in level[2]:
-                    names.append(os.path.join(level[0], filename))
-            os.chdir(cwd)
+            for path, _, filenames in os.walk(self.temp_dir):
+                for filename in filenames:
+                    names.append(os.path.relpath(os.path.join(path, filename),
+                                                 self.temp_dir))
             return names
 
     def read(self, file_path):
@@ -208,7 +211,7 @@ class Archive(object):
             # Unfortunately, patoolib does not expose an API to do this.
             raise NotImplementedError("Cannot read before unpacking.")
         else:
-            return file(os.path.join(self.temp_dir, file_path), "r")
+            return io.open(os.path.join(self.temp_dir, file_path), "rb")
 
     def write(self, file_path, file_object):
         """Writes a file in the archive in place.

@@ -1,11 +1,12 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2013 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2014 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2013 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2013-2016 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2016 William Di Luigi <williamdiluigi@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -21,30 +22,29 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
+import argparse
 import chardet
 import errno
+import itertools
 import logging
 import netifaces
 import os
 import sys
 import grp
-from argparse import ArgumentParser
-from collections import namedtuple
 
-import six
-
+import gevent
 import gevent.socket
+
+from cms import ServiceCoord, ConfigError, async_config, config
 
 
 logger = logging.getLogger(__name__)
-
-
-class ConfigError(Exception):
-    """Exception for critical configuration errors."""
-    pass
 
 
 def mkdir(path):
@@ -57,8 +57,8 @@ def mkdir(path):
     try:
         os.mkdir(path)
         try:
-            os.chmod(path, 0770)
-            cmsuser_gid = grp.getgrnam('cmsuser').gr_gid
+            os.chmod(path, 0o770)
+            cmsuser_gid = grp.getgrnam(config.cmsuser).gr_gid
             os.chown(path, -1, cmsuser_gid)
         except OSError as error:
             os.rmdir(path)
@@ -67,6 +67,38 @@ def mkdir(path):
         if error.errno != errno.EEXIST:
             return False
     return True
+
+
+# This function is vulnerable to a symlink attack, see:
+# https://bugs.python.org/issue4489
+# It appears the only bulletproof fix requires the ability to traverse
+# directories using file descriptors (like fwalk) which is only in py3.
+def rmtree(path):
+    """Recursively delete a directory tree.
+
+    Remove the directory at the given path, but first remove the files
+    it contains and recursively remove the subdirectories it contains.
+    Be cooperative with other greenlets by yielding often.
+
+    path (str): the path to a directory.
+
+    raise (OSError): in case of errors in the elementary operations.
+
+    """
+    if os.path.islink(path):
+        raise OSError("unsafe to call rmtree on a symlink")
+
+    for dirpath, subdirnames, filenames in os.walk(path, topdown=False):
+        for filename in filenames:
+            os.remove(os.path.join(dirpath, filename))
+            gevent.sleep(0)
+        for subdirname in subdirnames:
+            subdirpath = os.path.join(dirpath, subdirname)
+            if os.path.islink(subdirpath):
+                os.remove(subdirpath)
+                gevent.sleep(0)
+        os.rmdir(dirpath)
+        gevent.sleep(0)
 
 
 def utf8_decoder(value):
@@ -80,9 +112,9 @@ def utf8_decoder(value):
     raise (TypeError): if value isn't a string.
 
     """
-    if isinstance(value, six.text_type):
+    if isinstance(value, str):
         return value
-    elif isinstance(value, six.binary_type):
+    elif isinstance(value, bytes):
         try:
             return value.decode("utf-8")
         except UnicodeDecodeError:
@@ -92,41 +124,6 @@ def utf8_decoder(value):
                 pass
 
     raise TypeError("Not a string.")
-
-
-class Address(namedtuple("Address", "ip port")):
-    def __repr__(self):
-        return "%s:%d" % (self.ip, self.port)
-
-
-class ServiceCoord(namedtuple("ServiceCoord", "name shard")):
-    """A compact representation for the name and the shard number of a
-    service (thus identifying it).
-
-    """
-    def __repr__(self):
-        return "%s,%d" % (self.name, self.shard)
-
-
-class Config(object):
-    """This class will contain the configuration for the
-    services. This needs to be populated at the initilization stage.
-
-    The *_services variables are dictionaries indexed by ServiceCoord
-    with values of type Address.
-
-    Core services are the ones that are supposed to run whenever the
-    system is up.
-
-    Other services are not supposed to run when the system is up, or
-    anyway not constantly.
-
-    """
-    core_services = {}
-    other_services = {}
-
-
-async_config = Config()
 
 
 def get_safe_shard(service, provided_shard):
@@ -187,13 +184,11 @@ def get_service_shards(service):
     returns (int): the number of shards defined in the configuration.
 
     """
-    i = 0
-    while True:
+    for i in itertools.count():
         try:
             get_service_address(ServiceCoord(service, i))
         except KeyError:
             return i
-        i += 1
 
 
 def default_argument_parser(description, cls, ask_contest=None):
@@ -211,17 +206,18 @@ def default_argument_parser(description, cls, ask_contest=None):
     return (object): an instance of a service.
 
     """
-    parser = ArgumentParser(description=description)
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("shard", action="store", type=int, nargs="?")
 
     # We need to allow using the switch "-c" also for services that do
     # not need the contest_id because RS needs to be able to restart
     # everything without knowing which is which.
-    contest_id_help = "id of the contest to automatically load"
+    contest_id_help = "id of the contest to automatically load, " \
+                      "or ALL to serve all contests"
     if ask_contest is None:
         contest_id_help += " (ignored)"
-    parser.add_argument("-c", "--contest-id", action="store", type=int,
-                        help=contest_id_help)
+    parser.add_argument("-c", "--contest-id", action="store",
+                        type=utf8_decoder, help=contest_id_help)
     args = parser.parse_args()
 
     try:
@@ -229,21 +225,48 @@ def default_argument_parser(description, cls, ask_contest=None):
     except ValueError:
         raise ConfigError("Couldn't autodetect shard number and "
                           "no shard specified for service %s, "
-                          "quitting." % (cls.__name__))
+                          "quitting." % (cls.__name__,))
 
-    if ask_contest is not None:
-        if args.contest_id is not None:
-            # Test if there is a contest with the given contest id.
-            from cms.db import is_contest_id
-            if not is_contest_id(args.contest_id):
-                print("There is no contest with the specified id. "
-                      "Please try again.", file=sys.stderr)
-                sys.exit(1)
-            return cls(args.shard, args.contest_id)
-        else:
-            return cls(args.shard, ask_contest())
-    else:
+    if ask_contest is None:
         return cls(args.shard)
+    contest_id = contest_id_from_args(args.contest_id, ask_contest)
+    if contest_id is None:
+        return cls(args.shard)
+    else:
+        return cls(args.shard, contest_id)
+
+
+def contest_id_from_args(args_contest_id, ask_contest):
+    """Return a valid contest_id from the arguments or None if multicontest
+    mode should be used
+
+    If the passed value is missing, ask the admins with ask_contest.
+    If the contest id is invalid, print a message and exit.
+
+    args_contest_id (int|str|None): the contest_id passed as argument.
+    ask_contest (function): a function that returns a contest_id.
+
+    """
+    assert ask_contest is not None
+
+    if args_contest_id == "ALL":
+        return None
+    if args_contest_id is not None:
+        try:
+            contest_id = int(args_contest_id)
+        except ValueError:
+            logger.critical("Unable to parse contest id '%s'", args_contest_id)
+            sys.exit(1)
+    else:
+        contest_id = ask_contest()
+
+    # Test if there is a contest with the given contest id.
+    from cms.db import is_contest_id
+    if not is_contest_id(contest_id):
+        logger.critical("There is no contest with the specified id. "
+                        "Please try again.")
+        sys.exit(1)
+    return contest_id
 
 
 def _find_local_addresses():
@@ -279,7 +302,6 @@ def _get_shard_from_addresses(service, addrs):
         exist.
 
     """
-    i = 0
     ipv4_addrs = set()
     ipv6_addrs = set()
     for proto, addr in addrs:
@@ -287,33 +309,34 @@ def _get_shard_from_addresses(service, addrs):
             ipv4_addrs.add(addr)
         elif proto == gevent.socket.AF_INET6:
             ipv6_addrs.add(addr)
-    while True:
+
+    for shard in itertools.count():
         try:
-            host, port = get_service_address(ServiceCoord(service, i))
-            res_ipv4_addrs = set()
-            res_ipv6_addrs = set()
-            # For magic numbers, see getaddrinfo() documentation
-            try:
-                res_ipv4_addrs = set([x[4][0] for x in
-                                      gevent.socket.getaddrinfo(
-                                          host, port,
-                                          family=gevent.socket.AF_INET,
-                                          socktype=gevent.socket.SOCK_STREAM)])
-            except (gevent.socket.gaierror, gevent.socket.error):
-                res_ipv4_addrs = set()
-
-            try:
-                res_ipv6_addrs = set([x[4][0] for x in
-                                      gevent.socket.getaddrinfo(
-                                          host, port,
-                                          family=gevent.socket.AF_INET6,
-                                          socktype=gevent.socket.SOCK_STREAM)])
-            except (gevent.socket.gaierror, gevent.socket.error):
-                res_ipv6_addrs = set()
-
-            if not ipv4_addrs.isdisjoint(res_ipv4_addrs) or \
-                    not ipv6_addrs.isdisjoint(res_ipv6_addrs):
-                return i
+            host, port = get_service_address(ServiceCoord(service, shard))
         except KeyError:
+            # No more shards to test.
             return None
-        i += 1
+
+        try:
+            res_ipv4_addrs = set([x[4][0] for x in
+                                  gevent.socket.getaddrinfo(
+                                      host, port,
+                                      gevent.socket.AF_INET,
+                                      gevent.socket.SOCK_STREAM)])
+        except (gevent.socket.gaierror, gevent.socket.error):
+            pass
+        else:
+            if not ipv4_addrs.isdisjoint(res_ipv4_addrs):
+                return shard
+
+        try:
+            res_ipv6_addrs = set([x[4][0] for x in
+                                  gevent.socket.getaddrinfo(
+                                      host, port,
+                                      gevent.socket.AF_INET6,
+                                      gevent.socket.SOCK_STREAM)])
+        except (gevent.socket.gaierror, gevent.socket.error):
+            pass
+        else:
+            if not ipv6_addrs.isdisjoint(res_ipv6_addrs):
+                return shard

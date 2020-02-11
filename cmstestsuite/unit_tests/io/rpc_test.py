@@ -1,8 +1,8 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
-# Copyright © 2014-2016 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2014-2017 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2015 Stefano Maggiolo <s.maggiolo@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -23,8 +23,11 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import unittest
 
@@ -91,7 +94,7 @@ class TestRPC(unittest.TestCase):
         port (int): the port (0 causes any available port to be chosen)
 
         """
-        self._server = StreamServer((host, port), self.get_server)
+        self._server = StreamServer((host, port), self.handle_new_connection)
         self._server.start()
         self.host = self._server.server_host
         self.port = self._server.server_port
@@ -100,32 +103,30 @@ class TestRPC(unittest.TestCase):
     def kill_listener(self):
         """Stop listening."""
         # Some code may kill the listener in the middle of a test, and
-        # plan to spawn a new one aftwerards. Yet if the test fails
+        # plan to spawn a new one afterwards. Yet if the test fails
         # then upon tearDown _server will still be unset.
         if hasattr(self, "_server"):
             self._server.stop()
             del self._server
         # We leave self.host and self.port.
 
-    def get_server(self, socket_, address):
-        """Obtain a new RemoteServiceServer to handle a new connection.
+    def handle_new_connection(self, socket_, address):
+        """Create a new RemoteServiceServer to handle a new connection.
 
-        Instantiate a RemoteServiceServer, spawn its greenlet and add
-        it to self.servers. It will listen on the given socket, that
-        represents a connection opened by a remote host at the given
-        address.
+        Instantiate a RemoteServiceServer, add it to self.servers and
+        have it listen on the given socket (which is for a connection
+        opened by a remote host from the given address). This method
+        will block until the socket gets closed.
 
         socket_ (socket): the socket to use
         address (tuple): the (ip address, port) of the remote part
-        return (RemoteServiceServer): a server
 
         """
         server = RemoteServiceServer(self.service, address)
-        server.handle(socket_)
         self.servers.append(server)
-        return server
+        server.handle(socket_)
 
-    def get_client(self, coord, auto_retry=None):
+    def get_client(self, coord, block=True, auto_retry=None):
         """Obtain a new RemoteServiceClient to connect to a server.
 
         Instantiate a RemoteServiceClient, spawn its greenlet and add
@@ -133,6 +134,8 @@ class TestRPC(unittest.TestCase):
         the given coordinates.
 
         coord (ServiceCoord): the (name, shard) of the service
+        block (bool): whether to wait for the connection to be
+            established before returning
         auto_retry (float|None): how long to wait after a disconnection
             before trying to reconnect
         return (RemoteServiceClient): a client
@@ -140,22 +143,27 @@ class TestRPC(unittest.TestCase):
         """
         client = RemoteServiceClient(coord, auto_retry)
         client.connect()
+        if block:
+            client._connection_event.wait()
         self.clients.append(client)
         return client
 
     def disconnect_servers(self):
         """Disconnect all registered servers from their clients."""
-        for server in self.servers:
+        servers = self.servers.copy()
+        for server in servers:
             if server.connected:
                 server.disconnect()
 
     def disconnect_clients(self):
         """Disconnect all registered clients from their servers."""
-        for client in self.clients:
+        clients = self.clients.copy()
+        for client in clients:
             if client.connected:
                 client.disconnect()
 
-    def sleep(self):
+    @staticmethod
+    def sleep():
         """Pause the greenlet so other work can be done."""
         gevent.sleep(0.005)
 
@@ -231,17 +239,45 @@ class TestRPC(unittest.TestCase):
         self.assertTrue(result.successful())
         self.assertEqual(result.value, ["Hello", 42, "World"])
 
+    @patch("cms.io.rpc.gevent.socket.socket")
+    def test_background_connect(self, socket_mock):
+        # Patch the connect method of sockets so that it blocks until
+        # we set the done_event (we will do so at the end of the test).
+        connect_mock = socket_mock.return_value.connect
+        done_event = gevent.event.Event()
+        connect_mock.side_effect = lambda _: done_event.wait()
+        # Connect to the RPC server in non-blocking mode and make sure
+        # that we indeed don't block (i.e., take more than 0.001s).
+        with gevent.Timeout(0.001) as timeout:
+            try:
+                client = self.get_client(ServiceCoord("Foo", 0), block=False)
+            except gevent.Timeout as t:
+                if t is not timeout:
+                    raise
+                self.fail("Connecting blocks")
+        # As socket.connect() never returned, the RPC client cannot have
+        # connected.
+        self.assertFalse(client.connected)
+        # Unblock the socket's connect method and make sure it actually
+        # got called (otherwise this whole tests is pointless). Also,
+        # yield to other greenlets so that they can be awoken after the
+        # event triggered.
+        done_event.set()
+        gevent.sleep()
+        connect_mock.assert_called_once_with(Address(self.host, self.port))
+
     def test_autoreconnect1(self):
-        client = self.get_client(ServiceCoord("Foo", 0), 0.002)
+        client = self.get_client(ServiceCoord("Foo", 0), auto_retry=0.002)
         self.sleep()
         self.assertTrue(client.connected)
         self.disconnect_servers()
-        self.sleep()
-        self.assertTrue(client.connected, "Autoreconnect didn't kick in "
-                                          "after server disconnected")
+        gevent.sleep(0.01)
+        self.assertTrue(client.connected,
+                        "Autoreconnect didn't kick in "
+                        "after server disconnected")
 
     def test_autoreconnect2(self):
-        client = self.get_client(ServiceCoord("Foo", 0), 0.002)
+        client = self.get_client(ServiceCoord("Foo", 0), auto_retry=0.002)
         self.sleep()
         self.assertTrue(client.connected)
         self.disconnect_servers()
@@ -249,12 +285,12 @@ class TestRPC(unittest.TestCase):
         self.sleep()
         self.assertFalse(client.connected)
         self.spawn_listener(port=self.port)
-        gevent.sleep(0.005)
+        self.sleep()
         self.assertTrue(client.connected, "Autoreconnect didn't kick in "
                                           "after server came back online")
 
     def test_autoreconnect3(self):
-        client = self.get_client(ServiceCoord("Foo", 0), 0.002)
+        client = self.get_client(ServiceCoord("Foo", 0), auto_retry=0.002)
         self.sleep()
         self.assertTrue(client.connected)
         self.disconnect_clients()
@@ -335,6 +371,7 @@ class TestRPC(unittest.TestCase):
             self.assertFalse(client.connected)
             self.sleep()
             client.connect()
+            client._connection_event.wait()
             self.assertTrue(client.connected)
 
         self.sleep()
@@ -376,19 +413,19 @@ class TestRPC(unittest.TestCase):
 
     def test_send_invalid_json(self):
         sock = gevent.socket.create_connection((self.host, self.port))
-        sock.sendall("foo\r\n")
+        sock.sendall(b"foo\r\n")
         self.sleep()
-        self.assertTrue(self.servers[0].connected)
-        # Verify the server resumes normal operation.
-        self.test_method_return_int()
+        # Malformed messages cause the connection to be closed.
+        self.assertFalse(self.servers[0].connected)
+        sock.close()
 
     def test_send_incomplete_json(self):
         sock = gevent.socket.create_connection((self.host, self.port))
-        sock.sendall('{"__id": "foo"}\r\n')
+        sock.sendall(b'{"__id": "foo"}\r\n')
         self.sleep()
-        self.assertTrue(self.servers[0].connected)
-        # Verify the server resumes normal operation.
-        self.test_method_return_int()
+        # Malformed messages cause the connection to be closed.
+        self.assertFalse(self.servers[0].connected)
+        sock.close()
 
 
 if __name__ == "__main__":

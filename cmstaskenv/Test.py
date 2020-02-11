@@ -1,11 +1,11 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2013-2015 Luca Versari <veluca93@gmail.com>
 # Copyright © 2013 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2013 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2013-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -21,11 +21,13 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
 
 import atexit
-import json
 import logging
 import os
 import select
@@ -36,7 +38,6 @@ from cms.db import Executable
 from cms.db.filecacher import FileCacher
 from cms.grading import format_status_text
 from cms.grading.Job import EvaluationJob
-from cms.grading.tasktypes import get_task_type
 from cms.service.esoperations import ESOperation
 from cmscommon.terminal import move_cursor, add_color_to_string, \
     colors, directions
@@ -64,11 +65,11 @@ def mem_human(mem):
     if mem is None:
         return 'None'
     if mem > 2 ** 30:
-        return "%4.3gG" % (float(mem) / (2 ** 30))
+        return "%4.3gG" % (mem / (2 ** 30))
     if mem > 2 ** 20:
-        return "%4.3gM" % (float(mem) / (2 ** 20))
+        return "%4.3gM" % (mem / (2 ** 20))
     if mem > 2 ** 10:
-        return "%4dK" % (mem / (2 ** 10))
+        return "%4.3gK" % (mem / (2 ** 10))
     return "%4d" % mem
 
 
@@ -125,16 +126,16 @@ def test_testcases(base_dir, solution, language, assume=None):
             ESOperation.EVALUATION,
             None,
             dataset.id,
-            dataset.testcases[t].codename).to_dict(),
+            dataset.testcases[t].codename),
         language=language.name,
         task_type=dataset.task_type,
-        task_type_parameters=json.loads(dataset.task_type_parameters),
+        task_type_parameters=dataset.task_type_parameters,
         managers=dict(dataset.managers),
         executables=executables,
         input=dataset.testcases[t].input, output=dataset.testcases[t].output,
         time_limit=dataset.time_limit,
         memory_limit=dataset.memory_limit)) for t in dataset.testcases]
-    tasktype = get_task_type(dataset=dataset)
+    tasktype = dataset.task_type_object
 
     ask_again = True
     last_status = "ok"
@@ -166,8 +167,7 @@ def test_testcases(base_dir, solution, language, assume=None):
         points.append(float(job.outcome))
 
         # Avoid printing unneeded newline
-        job.text = [t.rstrip() if isinstance(t, basestring) else t
-                    for t in job.text]
+        job.text = [t.rstrip() if isinstance(t, str) else t for t in job.text]
 
         comments.append(format_status_text(job.text))
         tcnames.append(jobinfo[0])
@@ -202,7 +202,7 @@ def test_testcases(base_dir, solution, language, assume=None):
         move_cursor(directions.UP, erase=True)
 
     # Subtasks scoring
-    subtasks = json.loads(dataset.score_type_parameters)
+    subtasks = dataset.score_type_parameters
     if not isinstance(subtasks, list) or len(subtasks) == 0:
         subtasks = [[100, len(info)]]
 
@@ -226,7 +226,7 @@ def test_testcases(base_dir, solution, language, assume=None):
         stsdata = []
         worst = [0, 0]
         try:
-            for _ in xrange(i[1]):
+            for _ in range(i[1]):
                 stscores.append(points[pos])
                 stsdata.append((tcnames[pos], points[pos],
                                 comments[pos], info[pos]))

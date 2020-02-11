@@ -1,11 +1,13 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2012 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2016 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2017 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
+# Copyright © 2016 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2017 Luca Chiodini <luca@chiodini.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -21,25 +23,29 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import iterkeys, iteritems
 
+import argparse
 import ast
 import io
 import os
 import sys
-import mechanize
 import threading
 import random
 import time
 
-from argparse import ArgumentParser
-
-from cms import config, ServiceCoord, get_service_address
+from cms import config, ServiceCoord, get_service_address, utf8_decoder
 from cms.db import Contest, SessionGen
+from cmscommon.crypto import parse_authentication
 
 import cmstestsuite.web
-from cmstestsuite.web.CWSRequests import HomepageRequest, LoginRequest, \
+from cmstestsuite.web import Browser
+from cmstestsuite.web.CWSRequests import HomepageRequest, CWSLoginRequest, \
     TaskRequest, TaskStatementRequest, SubmitRandomRequest
 
 
@@ -133,7 +139,7 @@ class Actor(threading.Thread):
 
         self.name = "Actor thread for user %s" % (self.username)
 
-        self.browser = mechanize.Browser()
+        self.browser = Browser()
         self.die = False
 
     def run(self):
@@ -184,9 +190,9 @@ class Actor(threading.Thread):
         SLEEP_PERIOD = 0.1
         time_to_wait = self.metrics['time_coeff'] * \
             random.expovariate(self.metrics['time_lambda'])
-        sleep_num = int(time_to_wait / SLEEP_PERIOD)
+        sleep_num = time_to_wait // SLEEP_PERIOD
         remaining_sleep = time_to_wait - (sleep_num * SLEEP_PERIOD)
-        for i in xrange(sleep_num):
+        for _ in range(sleep_num):
             time.sleep(SLEEP_PERIOD)
             if self.die:
                 raise ActorDying()
@@ -200,10 +206,12 @@ class Actor(threading.Thread):
                                      self.username,
                                      loggedin=False,
                                      base_url=self.base_url))
-        self.do_step(LoginRequest(self.browser,
-                                  self.username,
-                                  self.password,
-                                  base_url=self.base_url))
+        lr = CWSLoginRequest(self.browser,
+                             self.username,
+                             self.password,
+                             base_url=self.base_url)
+        self.browser.read_xsrf_token(lr.base_url)
+        self.do_step(lr)
         self.do_step(HomepageRequest(self.browser,
                                      self.username,
                                      loggedin=True,
@@ -266,9 +274,19 @@ def harvest_contest_data(contest_id):
         contest = Contest.get_from_id(contest_id, session)
         for participation in contest.participations:
             user = participation.user
-            users[user.username] = {'password': user.password}
+            # Pick participation's password if present, or the user's.
+            password_source = participation.password
+            if password_source is None:
+                password_source = user.password
+            # We can log in only if we know the plaintext password.
+            method, password = parse_authentication(password_source)
+            if method != "plaintext":
+                print("Not using user %s with non-plaintext password."
+                      % user.username)
+                continue
+            users[user.username] = {'password': password}
         for task in contest.tasks:
-            tasks.append((task.id, task.name, task.statements.keys()))
+            tasks.append((task.id, task.name, list(iterkeys(task.statements))))
     return users, tasks
 
 
@@ -277,26 +295,35 @@ DEFAULT_METRICS = {'time_coeff': 10.0,
 
 
 def main():
-    parser = ArgumentParser(description="Stress tester for CMS")
-    parser.add_argument("-c", "--contest-id", type=int, required=True,
-                        help="ID of the contest to test against")
-    parser.add_argument("-n", "--actor-num", type=int,
-                        help="the number of actors to spawn")
+    parser = argparse.ArgumentParser(description="Stress tester for CMS")
+    parser.add_argument(
+        "-c", "--contest-id", action="store", type=int, required=True,
+        help="ID of the contest to test against")
+    parser.add_argument(
+        "-n", "--actor-num", action="store", type=int,
+        help="the number of actors to spawn")
     parser.add_argument(
         "-s", "--sort-actors", action="store_true",
         help="sort usernames alphabetically before slicing them")
-    parser.add_argument("-u", "--base-url",
-                        help="base URL for placing HTTP requests")
-    parser.add_argument("-S", "--submissions-path",
-                        help="base path for submission to send")
-    parser.add_argument("-p", "--prepare-path",
-                        help="file to put contest info to")
-    parser.add_argument("-r", "--read-from",
-                        help="file to read contest info from")
-    parser.add_argument("-t", "--time-coeff", type=float, default=10.0,
-                        help="average wait between actions")
-    parser.add_argument("-o", "--only-submit", action="store_true",
-                        help="whether the actor only submits solutions")
+    parser.add_argument(
+        "-u", "--base-url", action="store", type=utf8_decoder,
+        help="base contest URL for placing HTTP requests "
+             "(without trailing slash)")
+    parser.add_argument(
+        "-S", "--submissions-path", action="store", type=utf8_decoder,
+        help="base path for submission to send")
+    parser.add_argument(
+        "-p", "--prepare-path", action="store", type=utf8_decoder,
+        help="file to put contest info to")
+    parser.add_argument(
+        "-r", "--read-from", action="store", type=utf8_decoder,
+        help="file to read contest info from")
+    parser.add_argument(
+        "-t", "--time-coeff", action="store", type=float, default=10.0,
+        help="average wait between actions")
+    parser.add_argument(
+        "-o", "--only-submit", action="store_true",
+        help="whether the actor only submits solutions")
     args = parser.parse_args()
 
     # If prepare_path is specified we only need to save some useful
@@ -311,7 +338,7 @@ def main():
         return
 
     assert args.time_coeff > 0.0
-    assert not (args.only_submit and args.submissions_path == "")
+    assert not (args.only_submit and len(args.submissions_path) == 0)
 
     users = []
     tasks = []
@@ -326,8 +353,12 @@ def main():
         users = contest_data['users']
         tasks = contest_data['tasks']
 
+    if len(users) == 0:
+        print("No viable users, terminating.")
+        return
+
     if args.actor_num is not None:
-        user_items = users.items()
+        user_items = list(iteritems(users))
         if args.sort_actors:
             user_items.sort()
         else:
@@ -353,7 +384,7 @@ def main():
                                                               username)),
                           base_url=base_url,
                           submissions_path=args.submissions_path)
-              for username, data in users.iteritems()]
+              for username, data in iteritems(users)]
     for actor in actors:
         actor.start()
 
@@ -371,10 +402,8 @@ def main():
     # scanner.dump_all_objects('objects.json')
     # print("Dump finished")
 
-    finished = False
-    while not finished:
-        for actor in actors:
-            actor.join()
+    for actor in actors:
+        actor.join()
 
     print("Test finished", file=sys.stderr)
 

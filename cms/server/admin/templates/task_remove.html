@@ -1,11 +1,11 @@
-{% extends base.html %}
+{% extends "base.html" %}
 
 {% block core %}
 <div class="core_title">
   <h1>Remove Task</h1>
 </div>
 
-{% if current_user.permission_all %}
+{% if admin.permission_all %}
 <p>
   Are you sure you want to remove task {{ task.name }} from CMS, including all related data?
   <br>
@@ -14,11 +14,11 @@
   This operation cannot be undone.
 </p>
 <br>
-<a onclick="CMS.AWSUtils.ajax_delete('{{ url_root }}/tasks/{{ task.id }}/remove');" class="button-link">Yes, remove</a>
-<a href="{{ url_root }}/tasks" class="button-link">No</a>
+<a onclick="CMS.AWSUtils.ajax_delete('{{ url("tasks", task.id, "remove") }}');" class="button-link">Yes, remove</a>
+<a href="{{ url("tasks") }}" class="button-link">No</a>
 
 {% else %}
 You do not have permission to remove a task.
-{% end %}
+{% endif %}
 
-{% end %}
+{% endblock core %}

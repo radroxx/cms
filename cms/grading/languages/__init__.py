@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
@@ -18,31 +18,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-
-import logging
-
-from cms import plugin_lookup
-
-
-logger = logging.getLogger(__name__)
-
-
-def get_language_class(name):
-    """Load the Language subclass given as parameter."""
-    return plugin_lookup(name, "cms.grading.languages", "languages")
-
-
-def get_language(name=None):
-    """Construct the Language specified by parameters.
-
-    name (unicode): the name of the Language class.
-
-    return (Language): an instance of the correct Language class.
-
-    raise (ValueError): when there is no such language.
-
-    """
-    class_ = get_language_class(name)
-    return class_()
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa

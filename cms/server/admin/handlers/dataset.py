@@ -1,11 +1,11 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # Contest Management System - http://cms-dev.github.io/
 # Copyright © 2010-2013 Giovanni Mascellani <mascellani@poisson.phc.unipi.it>
-# Copyright © 2010-2015 Stefano Maggiolo <s.maggiolo@gmail.com>
+# Copyright © 2010-2018 Stefano Maggiolo <s.maggiolo@gmail.com>
 # Copyright © 2010-2012 Matteo Boscariol <boscarim@hotmail.com>
-# Copyright © 2012-2014 Luca Wehrstedt <luca.wehrstedt@gmail.com>
+# Copyright © 2012-2018 Luca Wehrstedt <luca.wehrstedt@gmail.com>
 # Copyright © 2014 Artem Iglikov <artem.iglikov@gmail.com>
 # Copyright © 2014 Fabian Gundlach <320pointsguy@gmail.com>
 # Copyright © 2016 Myungwoo Chun <mc.tamaki@gmail.com>
@@ -29,28 +29,27 @@
 """
 
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from future.builtins.disabled import *  # noqa
+from future.builtins import *  # noqa
+from six import itervalues
 
-import json
+import io
 import logging
-import os
 import re
-import shutil
-import tempfile
 import zipfile
 
-from StringIO import StringIO
 import tornado.web
 
-from cms import config
 from cms.db import Dataset, Manager, Message, Participation, \
     Session, Submission, Task, Testcase
-from cms.grading import compute_changes_for_dataset
+from cms.grading.scoring import compute_changes_for_dataset
 from cmscommon.datetime import make_datetime
 from cmscommon.importers import import_testcases_from_zipfile
 
-from .base import BaseHandler, FileHandler, require_permission
+from .base import BaseHandler, require_permission
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +64,7 @@ class DatasetSubmissionsHandler(BaseHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         submission_query = self.sql_session.query(Submission)\
             .filter(Submission.task == task)
@@ -95,6 +95,7 @@ class CloneDatasetHandler(BaseHandler):
     def get(self, dataset_id_to_copy):
         dataset = self.safe_get_item(Dataset, dataset_id_to_copy)
         task = self.safe_get_item(Task, dataset.task_id)
+        self.contest = task.contest
 
         try:
             original_dataset = \
@@ -108,13 +109,13 @@ class CloneDatasetHandler(BaseHandler):
         self.r_params["clone_id"] = dataset_id_to_copy
         self.r_params["original_dataset"] = original_dataset
         self.r_params["original_dataset_task_type_parameters"] = \
-            json.loads(original_dataset.task_type_parameters)
+            original_dataset.task_type_parameters
         self.r_params["default_description"] = description
         self.render("add_dataset.html", **self.r_params)
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, dataset_id_to_copy):
-        fallback_page = "/dataset/%s/clone" % dataset_id_to_copy
+        fallback_page = self.url("dataset", dataset_id_to_copy, "clone")
 
         dataset = self.safe_get_item(Dataset, dataset_id_to_copy)
         task = self.safe_get_item(Task, dataset.task_id)
@@ -134,7 +135,7 @@ class CloneDatasetHandler(BaseHandler):
             # Ensure description is unique.
             if any(attrs["description"] == d.description
                    for d in task.datasets):
-                self.application.service.add_notification(
+                self.service.add_notification(
                     make_datetime(),
                     "Dataset name %r is already taken." % attrs["description"],
                     "Please choose a unique name for this dataset.")
@@ -154,7 +155,7 @@ class CloneDatasetHandler(BaseHandler):
 
         except Exception as error:
             logger.warning("Invalid field.", exc_info=True)
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), "Invalid field(s)", repr(error))
             self.redirect(fallback_page)
             return
@@ -172,7 +173,7 @@ class CloneDatasetHandler(BaseHandler):
             task.active_dataset = dataset
 
         if self.try_commit():
-            self.redirect("/task/%s" % task_id)
+            self.redirect(self.url("task", task_id))
         else:
             self.redirect(fallback_page)
 
@@ -185,6 +186,7 @@ class RenameDatasetHandler(BaseHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -193,7 +195,7 @@ class RenameDatasetHandler(BaseHandler):
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, dataset_id):
-        fallback_page = "/dataset/%s/rename" % dataset_id
+        fallback_page = self.url("dataset", dataset_id, "rename")
 
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
@@ -203,7 +205,7 @@ class RenameDatasetHandler(BaseHandler):
         # Ensure description is unique.
         if any(description == d.description
                for d in task.datasets if d is not dataset):
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Dataset name \"%s\" is already taken." % description,
                 "Please choose a unique name for this dataset.")
@@ -213,7 +215,7 @@ class RenameDatasetHandler(BaseHandler):
         dataset.description = description
 
         if self.try_commit():
-            self.redirect("/task/%s" % task.id)
+            self.redirect(self.url("task", task.id))
         else:
             self.redirect(fallback_page)
 
@@ -226,6 +228,7 @@ class DeleteDatasetHandler(BaseHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -240,9 +243,9 @@ class DeleteDatasetHandler(BaseHandler):
         self.sql_session.delete(dataset)
 
         if self.try_commit():
-            # self.application.service.scoring_service.reinitialize()
+            # self.service.scoring_service.reinitialize()
             pass
-        self.redirect("/task/%s" % task.id)
+        self.redirect(self.url("task", task.id))
 
 
 class ActivateDatasetHandler(BaseHandler):
@@ -253,6 +256,7 @@ class ActivateDatasetHandler(BaseHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         changes = compute_changes_for_dataset(task.active_dataset, dataset)
         notify_participations = set()
@@ -282,14 +286,14 @@ class ActivateDatasetHandler(BaseHandler):
         task.active_dataset = dataset
 
         if self.try_commit():
-            self.application.service.proxy_service.dataset_updated(
+            self.service.proxy_service.dataset_updated(
                 task_id=task.id)
 
             # This kicks off judging of any submissions which were previously
             # unloved, but are now part of an autojudged taskset.
-            self.application.service\
+            self.service\
                 .evaluation_service.search_operations_not_done()
-            self.application.service\
+            self.service\
                 .scoring_service.search_operations_not_done()
 
         # Now send notifications to contestants.
@@ -310,11 +314,11 @@ class ActivateDatasetHandler(BaseHandler):
             count += 1
 
         if self.try_commit():
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Messages sent to %d users." % count, "")
 
-        self.redirect("/task/%s" % task.id)
+        self.redirect(self.url("task", task.id))
 
 
 class ToggleAutojudgeDatasetHandler(BaseHandler):
@@ -328,13 +332,13 @@ class ToggleAutojudgeDatasetHandler(BaseHandler):
         dataset.autojudge = not dataset.autojudge
 
         if self.try_commit():
-            # self.application.service.scoring_service.reinitialize()
+            # self.service.scoring_service.reinitialize()
 
             # This kicks off judging of any submissions which were previously
             # unloved, but are now part of an autojudged taskset.
-            self.application.service\
+            self.service\
                 .evaluation_service.search_operations_not_done()
-            self.application.service\
+            self.service\
                 .scoring_service.search_operations_not_done()
 
         self.write("./%d" % dataset.task_id)
@@ -348,6 +352,7 @@ class AddManagerHandler(BaseHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -356,7 +361,7 @@ class AddManagerHandler(BaseHandler):
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, dataset_id):
-        fallback_page = "/dataset/%s/managers/add" % dataset_id
+        fallback_page = self.url("dataset", dataset_id, "managers", "add")
 
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
@@ -366,11 +371,11 @@ class AddManagerHandler(BaseHandler):
         self.sql_session.close()
 
         try:
-            digest = self.application.service.file_cacher.put_file_content(
+            digest = self.service.file_cacher.put_file_content(
                 manager["body"],
                 "Task manager for %s" % task_name)
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Manager storage failed",
                 repr(error))
@@ -385,7 +390,7 @@ class AddManagerHandler(BaseHandler):
         self.sql_session.add(manager)
 
         if self.try_commit():
-            self.redirect("/task/%s" % task.id)
+            self.redirect(self.url("task", task.id))
         else:
             self.redirect(fallback_page)
 
@@ -419,6 +424,7 @@ class AddTestcaseHandler(BaseHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -427,7 +433,7 @@ class AddTestcaseHandler(BaseHandler):
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, dataset_id):
-        fallback_page = "/dataset/%s/testcases/add" % dataset_id
+        fallback_page = self.url("dataset", dataset_id, "testcases", "add")
 
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
@@ -438,7 +444,7 @@ class AddTestcaseHandler(BaseHandler):
             input_ = self.request.files["input"][0]
             output = self.request.files["output"][0]
         except KeyError:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Invalid data",
                 "Please fill both input and output.")
@@ -451,15 +457,15 @@ class AddTestcaseHandler(BaseHandler):
 
         try:
             input_digest = \
-                self.application.service.file_cacher.put_file_content(
+                self.service.file_cacher.put_file_content(
                     input_["body"],
                     "Testcase input for task %s" % task_name)
             output_digest = \
-                self.application.service.file_cacher.put_file_content(
+                self.service.file_cacher.put_file_content(
                     output["body"],
                     "Testcase output for task %s" % task_name)
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Testcase storage failed",
                 repr(error))
@@ -476,8 +482,8 @@ class AddTestcaseHandler(BaseHandler):
 
         if self.try_commit():
             # max_score and/or extra_headers might have changed.
-            self.application.service.proxy_service.reinitialize()
-            self.redirect("/task/%s" % task.id)
+            self.service.proxy_service.reinitialize()
+            self.redirect(self.url("task", task.id))
         else:
             self.redirect(fallback_page)
 
@@ -490,6 +496,7 @@ class AddTestcasesHandler(BaseHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -498,7 +505,8 @@ class AddTestcasesHandler(BaseHandler):
 
     @require_permission(BaseHandler.PERMISSION_ALL)
     def post(self, dataset_id):
-        fallback_page = "/dataset/%s/testcases/add_multiple" % dataset_id
+        fallback_page = \
+            self.url("dataset", dataset_id, "testcases", "add_multiple")
 
         # TODO: this method is quite long, some splitting is needed.
         dataset = self.safe_get_item(Dataset, dataset_id)
@@ -507,7 +515,7 @@ class AddTestcasesHandler(BaseHandler):
         try:
             archive = self.request.files["archive"][0]
         except KeyError:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Invalid data",
                 "Please choose tests archive.")
@@ -525,23 +533,23 @@ class AddTestcasesHandler(BaseHandler):
         output_re = re.compile(re.escape(output_template).replace("\\*",
                                "(.*)") + "$")
 
-        fp = StringIO(archive["body"])
+        fp = io.BytesIO(archive["body"])
         try:
             successful_subject, successful_text = \
                 import_testcases_from_zipfile(
                     self.sql_session,
-                    self.application.service.file_cacher, dataset,
+                    self.service.file_cacher, dataset,
                     fp, input_re, output_re, overwrite, public)
         except Exception as error:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(), str(error), repr(error))
             self.redirect(fallback_page)
             return
 
-        self.application.service.add_notification(
+        self.service.add_notification(
             make_datetime(), successful_subject, successful_text)
-        self.application.service.proxy_service.reinitialize()
-        self.redirect("/task/%s" % task.id)
+        self.service.proxy_service.reinitialize()
+        self.redirect(self.url("task", task.id))
 
 
 class DeleteTestcaseHandler(BaseHandler):
@@ -563,11 +571,11 @@ class DeleteTestcaseHandler(BaseHandler):
 
         if self.try_commit():
             # max_score and/or extra_headers might have changed.
-            self.application.service.proxy_service.reinitialize()
+            self.service.proxy_service.reinitialize()
         self.write("./%d" % task_id)
 
 
-class DownloadTestcasesHandler(FileHandler):
+class DownloadTestcasesHandler(BaseHandler):
     """Download all testcases in a zip file.
 
     """
@@ -575,6 +583,7 @@ class DownloadTestcasesHandler(FileHandler):
     def get(self, dataset_id):
         dataset = self.safe_get_item(Dataset, dataset_id)
         task = dataset.task
+        self.contest = task.contest
 
         self.r_params = self.render_params()
         self.r_params["task"] = task
@@ -583,7 +592,8 @@ class DownloadTestcasesHandler(FileHandler):
 
     @require_permission(BaseHandler.AUTHENTICATED)
     def post(self, dataset_id):
-        fallback_page = "/dataset/%s/testcases/download" % dataset_id
+        fallback_page = \
+            self.url("dataset", dataset_id, "testcases", "download")
 
         dataset = self.safe_get_item(Dataset, dataset_id)
 
@@ -595,7 +605,7 @@ class DownloadTestcasesHandler(FileHandler):
 
         # Template validations
         if input_template.count('*') != 1 or output_template.count('*') != 1:
-            self.application.service.add_notification(
+            self.service.add_notification(
                 make_datetime(),
                 "Invalid template format",
                 "You must have exactly one '*' in input/output template.")
@@ -606,22 +616,24 @@ class DownloadTestcasesHandler(FileHandler):
         input_template = input_template.strip().replace("*", "%s")
         output_template = output_template.strip().replace("*", "%s")
 
-        # Create a temp dir to contain the content of the zip file.
-        tempdir = tempfile.mkdtemp(dir=config.temp_dir)
-        zip_path = os.path.join(tempdir, "testcases.zip")
-        with zipfile.ZipFile(zip_path, "w") as zip_file:
-            for testcase in dataset.testcases.itervalues():
+        # FIXME When Tornado will stop having the WSGI adapter buffer
+        # the whole response, we could use a tempfile.TemporaryFile so
+        # to avoid having the whole ZIP file in memory at once.
+        temp_file = io.BytesIO()
+        with zipfile.ZipFile(temp_file, "w") as zip_file:
+            for testcase in itervalues(dataset.testcases):
                 # Get input, output file path
-                input_path = self.application.service.file_cacher.\
-                    get_file(testcase.input).name
-                output_path = self.application.service.file_cacher.\
-                    get_file(testcase.output).name
+                with self.service.file_cacher.get_file(testcase.input) as f:
+                    input_path = f.name
+                with self.service.file_cacher.get_file(testcase.output) as f:
+                    output_path = f.name
                 zip_file.write(
                     input_path, input_template % testcase.codename)
                 zip_file.write(
                     output_path, output_template % testcase.codename)
-            zip_file.close()
 
-        self.fetch_from_filesystem(zip_path, "application/zip", zip_filename)
+        self.set_header("Content-Type", "application/zip")
+        self.set_header("Content-Disposition",
+                        "attachment; filename=\"%s\"" % zip_filename)
 
-        shutil.rmtree(tempdir)
+        self.write(temp_file.getvalue())
