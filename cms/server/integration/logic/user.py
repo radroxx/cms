@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 from __future__ import absolute_import
@@ -11,6 +11,7 @@ from tornado_json.exceptions import APIError
 
 from cms.db import User, Contest, Participation, Task
 from cms.grading import task_score
+from cmscommon.crypto import hash_password
 
 
 def get_user_or_404(session, username):
@@ -22,7 +23,7 @@ def get_user_or_404(session, username):
 
 
 def create_user(session, username, first_name="", last_name="", password="",
-                email=None, timezone=None, preferred_languages="[]"):
+                email=None, timezone=None, preferred_languages="[]", hash_method="bcrypt"):
     user = session.query(User).filter(User.username == username).first()
     if user is not None:
         raise APIError(409, "User with such username already exist.")
@@ -31,7 +32,7 @@ def create_user(session, username, first_name="", last_name="", password="",
         username=username,
         first_name=first_name,
         last_name=last_name,
-        password=password,
+        password=hash_password(password, hash_method),
         email=email,
         timezone=timezone,
         preferred_languages=preferred_languages,
@@ -43,7 +44,7 @@ def create_user(session, username, first_name="", last_name="", password="",
 
 
 def change_user(session, user, username, first_name="", last_name="", password="",
-                email=None, timezone=None, preferred_languages="[]"):
+                email=None, timezone=None, preferred_languages="[]", hash_method="bcrypt"):
     if user.username != username:
         new_user = session.query(User).filter(User.username == username).first()
         if new_user is not None:
@@ -52,7 +53,7 @@ def change_user(session, user, username, first_name="", last_name="", password="
     user.username = username
     user.first_name = first_name
     user.last_name = last_name
-    user.password = password
+    user.password = hash_password(password, hash_method)
     user.email = email
     user.timezone = timezone
     user.preferred_languages = preferred_languages

@@ -79,6 +79,7 @@ JSON schema:
             "timezone": {"type": "string"},
             "preferred_languages": {"type": "string"},
             "contest_id": {"type": "integer"},
+            "hash_method": {"enum": ["bcrypt", "plaintext"]},
         },
         "required": ["username", "password", ]
     }
@@ -117,6 +118,7 @@ JSON schema:
             "email": {"type": "string"},
             "timezone": {"type": "string"},
             "preferred_languages": {"type": "string"},
+            "hash_method": {"enum": ["bcrypt", "plaintext"]},
         },
         "required": ["username", ]
     }

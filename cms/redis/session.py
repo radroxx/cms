@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 from __future__ import absolute_import
@@ -27,7 +27,7 @@ def redis_decorator(func):
         try:
             return func(*args, **kwargs)
         except (RedisResponseError, RedisConnectionError) as e:
-            logger.error(e)
+            logger.exception(e)
     return wrapped
 
 

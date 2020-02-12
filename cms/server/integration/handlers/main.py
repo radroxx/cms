@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 from __future__ import absolute_import
@@ -83,6 +83,7 @@ class CreateUserHandler(BaseAPIHandler):
                 "timezone": {"type": "string"},
                 "preferred_languages": {"type": "string"},
                 "contest_id": {"type": "integer"},
+                "hash_method": {"enum": ["bcrypt", "plaintext"]},
             },
             "required": ["username", "password", ]
         },
@@ -104,6 +105,7 @@ class CreateUserHandler(BaseAPIHandler):
             self.body.get("email", None),
             self.body.get("timezone", None),
             self.body.get("preferred_languages", "[]"),
+            self.body.get("hash_method", "bcrypt"),
         )
         result = {"user_id": user.id}
 
@@ -132,6 +134,7 @@ class ChangeUserHandler(BaseAPIHandler):
                 "email": {"type": "string"},
                 "timezone": {"type": "string"},
                 "preferred_languages": {"type": "string"},
+                "hash_method": {"enum": ["bcrypt", "plaintext"]},
             },
             "required": ["username", ]
         },
@@ -155,6 +158,7 @@ class ChangeUserHandler(BaseAPIHandler):
             self.body.get("email", user.email),
             self.body.get("timezone", user.timezone),
             self.body.get("preferred_languages", user.preferred_languages),
+            self.body.get("hash_method", "bcrypt"),
         )
         result = {"user_id": user.id}
         self.application.service.proxy_service.reinitialize()
