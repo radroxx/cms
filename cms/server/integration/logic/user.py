@@ -10,7 +10,7 @@ from sqlalchemy.orm import joinedload
 from tornado_json.exceptions import APIError
 
 from cms.db import User, Contest, Participation, Task
-from cms.grading import task_score
+from cms.grading.scoring import task_score
 from cmscommon.crypto import hash_password
 
 
