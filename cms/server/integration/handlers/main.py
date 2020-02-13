@@ -31,7 +31,7 @@ class GetUserHandler(BaseAPIHandler):
                 "username": {"type": "string"},
                 "email": {"type": "string"},
                 "timezone": {"type": "string"},
-                "preferred_languages": {"type": "string"},
+                "preferred_languages": {"type": "array","items":{"type":"string"}},
                 "contest": {
                     "type": "object",
                     "properties": {
@@ -81,7 +81,7 @@ class CreateUserHandler(BaseAPIHandler):
                 "password": {"type": "string"},
                 "email": {"type": "string"},
                 "timezone": {"type": "string"},
-                "preferred_languages": {"type": "string"},
+                "preferred_languages": {"type": "array","items":{"type":"string"}},
                 "contest_id": {"type": "integer"},
                 "hash_method": {"enum": ["bcrypt", "plaintext"]},
             },
@@ -104,7 +104,7 @@ class CreateUserHandler(BaseAPIHandler):
             self.body.get("password", ""),
             self.body.get("email", None),
             self.body.get("timezone", None),
-            self.body.get("preferred_languages", "[]"),
+            self.body.get("preferred_languages", []),
             self.body.get("hash_method", "bcrypt"),
         )
         result = {"user_id": user.id}
@@ -133,7 +133,7 @@ class ChangeUserHandler(BaseAPIHandler):
                 "password": {"type": "string"},
                 "email": {"type": "string"},
                 "timezone": {"type": "string"},
-                "preferred_languages": {"type": "string"},
+                "preferred_languages": {"type": "array","items":{"type":"string"}},
                 "hash_method": {"enum": ["bcrypt", "plaintext"]},
             },
             "required": ["username", ]
